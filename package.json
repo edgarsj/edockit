@@ -36,5 +36,29 @@
   "module": "dist/index.esm.js",
   "browser": "dist/index.umd.js",
   "types": "dist/index.d.ts",
-  "files": "[\"dist\", \"LICENSE\", \"README.md\"]"
+  "files": "[\"dist\", \"LICENSE\", \"README.md\"]",
+  "optionalDependencies": {
+    "0": "@",
+    "1": "x",
+    "2": "m",
+    "3": "l",
+    "4": "d",
+    "5": "o",
+    "6": "m",
+    "7": "/",
+    "8": "x",
+    "9": "m",
+    "10": "l",
+    "11": "d",
+    "12": "o",
+    "13": "m",
+    "14": "@",
+    "15": "^",
+    "16": "0",
+    "17": ".",
+    "18": "8",
+    "19": ".",
+    "20": "1",
+    "21": "0"
+  }
 }
