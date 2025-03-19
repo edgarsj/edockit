@@ -1,3 +1,11 @@
+// Define types for canonicalization methods
+interface CanonMethod {
+  beforeChildren: (hasElementChildren?: boolean) => string;
+  afterChildren: (hasElementChildren?: boolean) => string;
+  betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => string;
+  afterElement: () => string;
+}
+
 // Canonicalization method URIs
 const CANONICALIZATION_METHODS = {
   default: "c14n",
@@ -7,47 +15,47 @@ const CANONICALIZATION_METHODS = {
 };
 
 // Internal method implementations
-const methods = {
+const methods: Record<string, CanonMethod> = {
   c14n: {
-    beforeChildren() {
+    beforeChildren: () => {
       return "";
     },
-    afterChildren() {
+    afterChildren: () => {
       return "";
     },
-    betweenChildren() {
+    betweenChildren: () => {
       return "";
     },
-    afterElement() {
+    afterElement: () => {
       return "";
     },
   },
   c14n11: {
-    beforeChildren(hasElementChildren: boolean) {
+    beforeChildren: (hasElementChildren?: boolean) => {
       return hasElementChildren ? "\n" : "";
     },
-    afterChildren(hasElementChildren: boolean) {
+    afterChildren: (hasElementChildren?: boolean) => {
       return hasElementChildren ? "\n" : "";
     },
-    betweenChildren(prevIsElement: boolean, nextIsElement: boolean) {
+    betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => {
       return prevIsElement && nextIsElement ? "\n" : "";
     },
-    afterElement() {
+    afterElement: () => {
       return "";
     },
   },
   c14n_exc: {
     // Placeholder for exclusive canonicalization - to be implemented
-    beforeChildren() {
+    beforeChildren: () => {
       return "";
     },
-    afterChildren() {
+    afterChildren: () => {
       return "";
     },
-    betweenChildren() {
+    betweenChildren: () => {
       return "";
     },
-    afterElement() {
+    afterElement: () => {
       return "";
     },
   },
@@ -89,9 +97,9 @@ const NODE_TYPES = {
 };
 
 class XMLCanonicalizer {
-  private method: any;
+  private method: CanonMethod;
   
-  constructor(method = methods.c14n) {
+  constructor(method: CanonMethod = methods.c14n) {
     this.method = method;
   }
 
@@ -101,7 +109,7 @@ class XMLCanonicalizer {
     if (!methodKey) {
       throw new Error(`Unsupported canonicalization method: ${methodUri}`);
     }
-    return new XMLCanonicalizer(methods[methodKey as keyof typeof methods]);
+    return new XMLCanonicalizer(methods[methodKey]);
   }
 
   static base64Elements = new Set([
@@ -112,7 +120,7 @@ class XMLCanonicalizer {
     "IssuerSerialV2",
   ]);
 
-  setMethod(method: any): void {
+  setMethod(method: CanonMethod): void {
     this.method = method;
   }
 

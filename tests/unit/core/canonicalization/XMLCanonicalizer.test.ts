@@ -1,4 +1,4 @@
-import { XMLCanonicalizer, CANONICALIZATION_METHODS } from '../../../src/utils/XMLCanonicalizer';
+import { XMLCanonicalizer, CANONICALIZATION_METHODS } from '../../../../src/core/canonicalization/XMLCanonicalizer';
 
 describe('XMLCanonicalizer', () => {
   it('should correctly initialize with a method', () => {
