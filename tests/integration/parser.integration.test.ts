@@ -73,5 +73,32 @@ describe("eDoc Parser Integration Tests", () => {
       // The certificate should be valid at signing time
       expect(validityCheck.isValid).toBe(true);
     }
+    // Verify file checksums
+    const checksumResults = verifyChecksums(signature, container.files);
+    console.log("\nChecksum verification results:");
+    console.log("- All checksums valid:", checksumResults.isValid);
+
+    for (const [filename, result] of Object.entries(checksumResults.details)) {
+      console.log(`- ${filename}:`);
+      console.log(`  File found: ${result.fileFound}`);
+      console.log(`  Checksum matches: ${result.matches}`);
+      if (!result.matches && result.fileFound) {
+        console.log(`  Expected: ${result.expected}`);
+        console.log(`  Actual: ${result.actual}`);
+      }
+    }
+
+    // Checksums should be valid
+    expect(checksumResults.isValid).toBe(true);
+
+    // Verify that signature references include both files
+    const references = signature.references;
+    console.log("\nFiles referenced in signature:", references);
+
+    const hasPdfRef = references.some((ref) => ref.endsWith(".pdf"));
+    const hasDocxRef = references.some((ref) => ref.endsWith(".docx"));
+
+    expect(hasPdfRef).toBe(true);
+    expect(hasDocxRef).toBe(true);
   });
 });
