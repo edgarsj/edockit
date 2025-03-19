@@ -20,7 +20,7 @@
   "dependencies": {
     "@peculiar/x509": "^1.12.3",
     "fflate": "^0.8.2",
-    "xmldom": "^0.6.0"
+    "jsdom": "^22.1.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^28.0.3",
