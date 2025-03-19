@@ -19,11 +19,11 @@ export function createXMLParser(): XMLParserInterface {
   // We're in Node.js, so use xmldom
   try {
     // Import dynamically to avoid bundling issues
-    const { DOMParser } = require('@xmldom/xmldom');
+    const { DOMParser } = require('xmldom');
     return new DOMParser();
   } catch (error) {
     throw new Error(
-      'XML DOM parser not available. In Node.js environments, please install @xmldom/xmldom package.'
+      'XML DOM parser not available. In Node.js environments, please install xmldom package.'
     );
   }
 }
@@ -39,11 +39,11 @@ export function serializeToXML(node: Node): string {
 
   // We're in Node.js, so use xmldom
   try {
-    const { XMLSerializer } = require('@xmldom/xmldom');
+    const { XMLSerializer } = require('xmldom');
     return new XMLSerializer().serializeToString(node);
   } catch (error) {
     throw new Error(
-      'XML Serializer not available. In Node.js environments, please install @xmldom/xmldom package.'
+      'XML Serializer not available. In Node.js environments, please install xmldom package.'
     );
   }
 }
