@@ -1,6 +1,6 @@
 {
   "name": "edockit",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "main": "dist/index.cjs.js",
   "scripts": {
     "test": "jest",
