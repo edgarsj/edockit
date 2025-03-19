@@ -18,7 +18,8 @@
   "description": "",
   "dependencies": {
     "@peculiar/x509": "^1.12.3",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "xmldom": "^0.6.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^28.0.3",
@@ -36,20 +37,5 @@
   "module": "dist/index.esm.js",
   "browser": "dist/index.umd.js",
   "types": "dist/index.d.ts",
-  "files": "[\"dist\", \"LICENSE\", \"README.md\"]",
-  "optionalDependencies": {
-    "0": "x",
-    "1": "m",
-    "2": "l",
-    "3": "d",
-    "4": "o",
-    "5": "m",
-    "6": "@",
-    "7": "^",
-    "8": "0",
-    "9": ".",
-    "10": "6",
-    "11": ".",
-    "12": "0"
-  }
+  "files": "[\"dist\", \"LICENSE\", \"README.md\"]"
 }
