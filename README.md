@@ -6,7 +6,7 @@ A JavaScript/TypeScript library for viewing and verifying Latvian eDoc signature
 
 ```bash
 # Install the core library
-npm install latvian-edoc-lib
+npm install edockit
 
 # If using in Node.js environment, also install xmldom
 npm install xmldom
@@ -15,7 +15,7 @@ npm install xmldom
 ## Usage
 
 ```typescript
-import { parseEdoc, verifySignature } from 'latvian-edoc-lib';
+import { parseEdoc, verifySignature } from 'edockit';
 
 // Parse an eDoc file
 const edocBuffer = new Uint8Array(/* your eDoc file */);
@@ -44,10 +44,10 @@ for (const signature of container.signatures) {
 For browser extensions, use the UMD build:
 
 ```html
-<script src="node_modules/latvian-edoc-lib/dist/index.umd.js"></script>
+<script src="node_modules/edockit/dist/index.umd.js"></script>
 <script>
   const { parseEdoc } = LatvianEdoc;
-  
+
   // Your code here
 </script>
 ```

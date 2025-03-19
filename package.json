@@ -1,5 +1,5 @@
 {
-  "name": "latvian-edoc-lib",
+  "name": "edockit",
   "version": "1.0.0",
   "main": "dist/index.cjs.js",
   "scripts": {
