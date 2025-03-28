@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "main": "dist/index.cjs.js",
   "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
+    "test": "jest --silent",
+    "test:verbose": "jest",
+    "test:watch": "jest --silent --watch",
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "start": "node dist/index.js",
@@ -38,5 +39,9 @@
   "module": "dist/index.esm.js",
   "browser": "dist/index.umd.js",
   "types": "dist/index.d.ts",
-  "files": "[\"dist\", \"LICENSE\", \"README.md\"]"
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ]
 }

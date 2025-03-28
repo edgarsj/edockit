@@ -1,102 +1,155 @@
-import { parseEdoc } from "../../../src/core/parser";
+// tests/unit/core/parser.test.ts
+import { __test__ } from "../../../src/core/parser/signatureParser";
+import { querySelector, querySelectorAll } from "../../../src/utils/xmlParser";
+import { CANONICALIZATION_METHODS } from "../../../src/core/canonicalization/XMLCanonicalizer";
 
-// Mock jsdom module
-jest.mock("jsdom", () => {
-  return {
-    JSDOM: class MockJSDOM {
-      window: any;
+const { parseSignatureElement } = __test__;
 
-      constructor(html: string, options: any) {
-        this.window = {
-          document: {
-            getElementsByTagName: (tagName: string) => {
-              if (tagName === "Signature") {
-                return [{ getAttribute: () => "test-sig-id" }];
-              }
-              if (tagName === "SigningTime") {
-                return [{ textContent: "2023-04-15T14:30:00Z" }];
-              }
-              if (tagName === "X509Certificate") {
-                return [{ textContent: "mock-certificate-data" }];
-              }
-              if (tagName === "Reference") {
-                return [
-                  {
-                    getAttribute: () => "test.pdf",
-                    getElementsByTagName: (innerTag: string) => {
-                      if (innerTag === "DigestValue") {
-                        return [{ textContent: "mock-digest-value" }];
-                      }
-                      return [];
-                    },
-                  },
-                ];
-              }
-              return [];
-            },
-          },
-        };
-      }
+// maybe remove the serialization in implementation or test separately
+global.XMLSerializer = jest.fn().mockImplementation(() => ({
+  serializeToString: jest
+    .fn()
+    .mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
+}));
+
+// Mock the certificate module
+jest.mock("../../../src/core/certificate", () => ({
+  extractSignerInfo: jest.fn().mockReturnValue({
+    commonName: "Test User",
+    organization: "Test Org",
+    country: "US",
+    serialNumber: "12345",
+    validFrom: new Date(),
+    validTo: new Date(),
+    issuer: {
+      commonName: "Test CA",
+      organization: "Test CA Org",
+      country: "US",
     },
-  };
-});
+  }),
+}));
 
-// Mock the createXMLParser utility
-jest.mock("../../../src/utils/xmlParser", () => {
-  return {
-    createXMLParser: jest.fn().mockImplementation(() => {
-      return {
-        parseFromString: () => {
-          // Return a simplified DOM document with the necessary methods
-          return {
-            getElementsByTagName: (tagName: string) => {
-              if (tagName === "Signature") {
-                return [{ getAttribute: () => "test-sig-id" }];
-              }
-              if (tagName === "SigningTime") {
-                return [{ textContent: "2023-04-15T14:30:00Z" }];
-              }
-              if (tagName === "X509Certificate") {
-                return [{ textContent: "mock-certificate-data" }];
-              }
-              if (tagName === "Reference") {
-                return [
-                  {
-                    getAttribute: () => "test.pdf",
-                    getElementsByTagName: (innerTag: string) => {
-                      if (innerTag === "DigestValue") {
-                        return [{ textContent: "mock-digest-value" }];
-                      }
-                      return [];
-                    },
-                  },
-                ];
-              }
-              return [];
-            },
-          };
+// Mock X509Certificate
+jest.mock("@peculiar/x509", () => ({
+  X509Certificate: class MockX509Certificate {
+    publicKey: any;
+
+    constructor() {
+      this.publicKey = {
+        algorithm: {
+          name: "RSASSA-PKCS1-v1_5",
         },
+        rawData: new ArrayBuffer(0),
       };
-    }),
-  };
-});
+    }
+  },
+}));
+
+// Mock canonicalization methods
+jest.mock("../../../src/core/canonicalization/XMLCanonicalizer", () => ({
+  CANONICALIZATION_METHODS: {
+    default: "http://www.w3.org/2001/10/xml-exc-c14n#",
+  },
+}));
+
+// Mock the XMLParser utilities
+jest.mock("../../../src/utils/xmlParser", () => ({
+  createXMLParser: jest.fn(),
+  querySelector: jest.fn(),
+  querySelectorAll: jest.fn(),
+}));
 
 describe("Signature Parser", () => {
-  it("should extract data from signature XML", () => {
-    const mockXmlContent = new TextEncoder().encode(
-      "<SignedInfo><SigningTime>2023-04-15T14:30:00Z</SigningTime></SignedInfo>",
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    // Create a map of selector patterns to responses
+    const mockResponses = {
+      SignedInfo: {
+        nodeName: "ds:SignedInfo",
+      },
+      CanonicalizationMethod: {
+        getAttribute: () => "http://www.w3.org/2001/10/xml-exc-c14n#",
+      },
+      SignatureMethod: {
+        getAttribute: () => "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+      },
+      SignatureValue: {
+        textContent: "MockSignatureValueBase64==",
+      },
+      X509Certificate: {
+        textContent: "MockCertificateBase64==",
+      },
+      SigningTime: {
+        textContent: "2023-04-15T14:30:00Z",
+      },
+      DigestValue: {
+        textContent: "mock-digest-value",
+      },
+    };
+
+    // Setup mock for querySelector - no recursion
+    (querySelector as jest.Mock).mockImplementation((element, selector) => {
+      // Check each key pattern and return the corresponding mock
+      for (const [pattern, response] of Object.entries(mockResponses)) {
+        if (selector.includes(pattern)) {
+          return response;
+        }
+      }
+      return null;
+    });
+
+    // Setup mock for querySelectorAll
+    (querySelectorAll as jest.Mock).mockImplementation((element, selector) => {
+      if (selector.includes("Reference")) {
+        return [
+          {
+            getAttribute: (attr: string) => {
+              if (attr === "URI") return "test.pdf";
+              if (attr === "Type") return "";
+              return "";
+            },
+          },
+        ];
+      }
+
+      return [];
+    });
+  });
+
+  it("should extract data from signature element", () => {
+    // Create a mock signature element and document
+    const mockSignatureElement = {
+      nodeName: "ds:Signature",
+      getAttribute: jest.fn().mockReturnValue("test-sig-id"),
+    };
+
+    const mockDocument = {
+      documentElement: {
+        nodeName: "root",
+      },
+    };
+
+    // Call the function with our mocked elements
+    const result = parseSignatureElement(
+      mockSignatureElement as unknown as Element,
+      mockDocument as unknown as Document,
     );
 
-    const edoc = parseEdoc(mockXmlContent);
-    const result = edoc.signatures[0];
-
+    // Verify results
     expect(result.id).toBe("test-sig-id");
     expect(result.signingTime).toBeInstanceOf(Date);
-    expect(result.certificate).toBe("mock-certificate-data");
-    expect(result.signedChecksums).toHaveProperty(
-      "test.pdf",
-      "mock-digest-value",
+    expect(result.certificate).toBe("MockCertificateBase64==");
+    expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
+    expect(result.signatureValue).toBe("MockSignatureValueBase64==");
+    expect(result.algorithm).toBe(
+      "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
     );
-    expect(result.references).toContain("test.pdf");
+
+    // Verify that querySelector was called with the right parameters
+    expect(querySelector).toHaveBeenCalledWith(
+      mockSignatureElement,
+      "ds\\:SignedInfo, SignedInfo",
+    );
   });
 });
