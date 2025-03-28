@@ -2,96 +2,133 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { parseEdoc } from "../../src/core/parser";
 import {
-  extractSignerInfo,
-  checkCertificateValidity,
+  parseCertificate,
+  getSignerDisplayName,
+  formatValidityPeriod,
 } from "../../src/core/certificate";
-import { verifyChecksums } from "../../src/core/verification";
-import { X509Certificate } from "@peculiar/x509";
+import { verifyChecksums, verifySignature } from "../../src/core/verification";
 
-describe("eDoc Parser Integration Tests", () => {
-  it("should correctly parse a real eDoc file", () => {
+describe("eDoc Parser and Verification Tests", () => {
+  it("should parse and verify a real eDoc file", async () => {
     // Read the test file
     const edocPath = join(__dirname, "../fixtures/Sample File.edoc");
     console.log("Reading file from:", edocPath);
     const edocBuffer = readFileSync(edocPath);
     console.log("File size:", edocBuffer.length, "bytes");
+
     // Parse the eDoc container
     const container = parseEdoc(edocBuffer);
 
     // Verify the files are present
     const fileNames = Array.from(container.files.keys());
-    expect(container.files.has("Sample File.pdf")).toBe(true);
-    expect(container.files.has("Sample File.docx")).toBe(true);
+    const hasPdf = fileNames.some((name) => name.endsWith(".pdf"));
+    const hasDocx = fileNames.some((name) => name.endsWith(".docx"));
+
+    expect(hasPdf).toBe(true);
+    expect(hasDocx).toBe(true);
+    console.log("Files in container:", fileNames);
 
     // Verify signatures were found
     expect(container.signatures.length).toBeGreaterThan(0);
+    console.log(`Found ${container.signatures.length} signatures`);
 
-    // Check the first signature has basic properties
+    // Test the first signature
     const signature = container.signatures[0];
-    expect(signature).toHaveProperty("id");
-    expect(signature).toHaveProperty("signingTime");
-    expect(signature).toHaveProperty("certificate");
-    expect(signature).toHaveProperty("signedChecksums");
-
-    // Log some information for manual inspection
-    console.log("Files in container:", Array.from(container.files.keys()));
     console.log("Signature ID:", signature.id);
     console.log("Signing time:", signature.signingTime);
-    // Extract and verify signer information
+
+    // Verify we have the necessary signature data for XML verification
+    console.log("\nSignature verification data:");
+    console.log("- Has SignedInfo XML:", !!signature.signedInfoXml);
+    console.log("- Has SignatureValue:", !!signature.signatureValue);
+    console.log("- Has Public Key:", !!signature.publicKey);
+    console.log(
+      "- Canonicalization Method:",
+      signature.canonicalizationMethod || "default",
+    );
+
+    // Parse and verify the certificate
     if (signature.certificatePEM) {
-      const cert = new X509Certificate(signature.certificatePEM);
-      const signerInfo = extractSignerInfo(cert);
+      const certInfo = await parseCertificate(signature.certificatePEM);
 
       console.log("\nSigner Information:");
-      console.log("- Common Name:", signerInfo.commonName);
-      console.log("- Organization:", signerInfo.organization);
-      console.log("- Country:", signerInfo.country);
-      console.log("- Serial Number:", signerInfo.serialNumber);
-      console.log("- Valid From:", signerInfo.validFrom.toISOString());
-      console.log("- Valid To:", signerInfo.validTo.toISOString());
-      console.log("\nIssuer Information:");
-      console.log("- Issuer Common Name:", signerInfo.issuer.commonName);
-      console.log("- Issuer Organization:", signerInfo.issuer.organization);
-
-      // Verify signer information is not empty
-      expect(signerInfo.commonName).toBeTruthy();
-      expect(signerInfo.country).toBeTruthy();
-
-      // Check certificate validity (using the signing time, not current time)
-      const validityCheck = checkCertificateValidity(
-        cert,
-        signature.signingTime,
-      );
-      console.log(
-        "\nCertificate validity at signing time:",
-        validityCheck.isValid,
-      );
-      if (!validityCheck.isValid) {
-        console.log("Reason:", validityCheck.reason);
+      const signerName = getSignerDisplayName(certInfo);
+      console.log("- Signer:", signerName);
+      console.log("- Country:", certInfo.subject.country);
+      if (certInfo.subject.serialNumber) {
+        console.log("- Serial Number:", certInfo.subject.serialNumber);
       }
+      console.log("- Validity Period:", formatValidityPeriod(certInfo));
 
-      // The certificate should be valid at signing time
-      expect(validityCheck.isValid).toBe(true);
+      console.log("\nIssuer Information:");
+      console.log("- Issuer:", certInfo.issuer.commonName);
+      console.log("- Issuer Organization:", certInfo.issuer.organization);
+
+      // Verify certificate and signature information exists
+      expect(
+        certInfo.subject.commonName ||
+          (certInfo.subject.givenName && certInfo.subject.surname),
+      ).toBeTruthy();
+      expect(certInfo.subject.country).toBeTruthy();
+      expect(certInfo.issuer.commonName).toBeTruthy();
     }
-    // Verify file checksums
+
+    // Verify checksums
     const checksumResults = verifyChecksums(signature, container.files);
-    console.log("\nChecksum verification results:");
+    console.log("\nChecksum verification:");
     console.log("- All checksums valid:", checksumResults.isValid);
 
     for (const [filename, result] of Object.entries(checksumResults.details)) {
-      console.log(`- ${filename}:`);
-      console.log(`  File found: ${result.fileFound}`);
-      console.log(`  Checksum matches: ${result.matches}`);
-      if (!result.matches && result.fileFound) {
-        console.log(`  Expected: ${result.expected}`);
-        console.log(`  Actual: ${result.actual}`);
-      }
+      console.log(
+        `- ${filename}: ${result.matches ? "✓" : "✗"} ${result.fileFound ? "" : "(file not found)"}`,
+      );
     }
 
     // Checksums should be valid
     expect(checksumResults.isValid).toBe(true);
 
-    // Verify that signature references include both files
+    // Perform a complete signature verification
+    console.log("\nPerforming complete signature verification...");
+    const verificationResult = await verifySignature(
+      signature,
+      container.files,
+      {
+        verifyTime: signature.signingTime,
+      },
+    );
+
+    console.log("\nVerification result:");
+    console.log("- Overall validity:", verificationResult.isValid);
+    console.log("- Certificate valid:", verificationResult.certificate.isValid);
+
+    if (verificationResult.signature) {
+      console.log(
+        "- XML Signature valid:",
+        verificationResult.signature.isValid,
+      );
+      if (
+        !verificationResult.signature.isValid &&
+        verificationResult.signature.reason
+      ) {
+        console.log("  Reason:", verificationResult.signature.reason);
+      }
+    }
+
+    if (verificationResult.errors && verificationResult.errors.length > 0) {
+      console.log("Verification errors:");
+      for (const error of verificationResult.errors) {
+        console.log(`- ${error}`);
+      }
+    }
+
+    // The verification should pass
+    expect(verificationResult.isValid).toBe(true);
+    expect(verificationResult.certificate.isValid).toBe(true);
+    if (verificationResult.signature) {
+      expect(verificationResult.signature.isValid).toBe(true);
+    }
+
+    // Verify that signature references include both document types
     const references = signature.references;
     console.log("\nFiles referenced in signature:", references);
 

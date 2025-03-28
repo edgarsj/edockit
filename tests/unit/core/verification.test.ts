@@ -1,24 +1,30 @@
-import { verifySignature } from '../../../src/core/verification';
-import { SignatureInfo } from '../../../src/core/parser';
+import { verifySignature } from "../../../src/core/verification";
+import { SignatureInfo } from "../../../src/core/parser";
+import { mock } from "node:test";
 
-describe('Signature Verification', () => {
-  it('should return a verification result', () => {
-    // Mock signature data
+describe("Signature Verification", () => {
+  it("should return a verification result", async () => {
+    // Create a mock signature object
     const mockSignature: SignatureInfo = {
-      signingTime: new Date(),
-      certificate: 'mock-certificate',
-      signedChecksums: { 'file.txt': 'abcdef1234567890' }
+      id: "test-sig-id",
+      signingTime: new Date("2023-04-15T14:30:00Z"),
+      certificate: "mock-certificate-data",
+      certificatePEM:
+        "-----BEGIN CERTIFICATE-----\nmock-certificate-content\n-----END CERTIFICATE-----",
+      signedChecksums: {
+        "test.pdf": "mock-digest-value",
+      },
+      references: ["test.pdf"],
     };
-    
-    // Mock files
+
+    // Create a mock files map
     const mockFiles = new Map<string, Uint8Array>();
-    mockFiles.set('file.txt', new TextEncoder().encode('Hello, world!'));
-    
-    // Verify
-    const result = verifySignature(mockSignature, mockFiles);
-    
+    mockFiles.set("test.pdf", new TextEncoder().encode("Mock PDF content"));
+
+    const result = await verifySignature(mockSignature, mockFiles);
+
     // For now, just check the structure
-    expect(result).toHaveProperty('isValid');
-    expect(result).toHaveProperty('errors');
+    expect(result).toHaveProperty("isValid");
+    expect(result).toHaveProperty("errors");
   });
 });

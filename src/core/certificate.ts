@@ -1,4 +1,5 @@
 import { X509Certificate } from "@peculiar/x509";
+import { count } from "console";
 
 /**
  * Certificate subject information
@@ -189,17 +190,15 @@ export async function parseCertificate(
   certData: string,
 ): Promise<CertificateInfo> {
   try {
-    const cleanedCertData = certData.replace(/[\r\n\s]/g, "");
-    let pemCert = cleanedCertData;
+    let pemCert = certData;
 
     // Check if it's already in PEM format, if not, convert it
-    if (!cleanedCertData.includes("-----BEGIN CERTIFICATE-----")) {
+    if (!certData.includes("-----BEGIN CERTIFICATE-----")) {
+      // Only clean non-PEM format data before conversion
+      const cleanedCertData = certData.replace(/[\r\n\s]/g, "");
       pemCert = formatPEM(cleanedCertData);
     }
-
     const cert = new X509Certificate(pemCert);
-
-    // Extract all info using our helper function
     const signerInfo = extractSignerInfo(cert);
 
     return {

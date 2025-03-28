@@ -5,6 +5,7 @@ import {
   querySelector,
   querySelectorAll,
 } from "../utils/xmlParser";
+import { CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { extractSignerInfo } from "./certificate";
 
 // Types for the parsed eDoc container
@@ -40,6 +41,9 @@ export interface SignatureInfo {
   references: string[]; // Filenames referenced by this signature
   algorithm?: string; // Signature algorithm URI
   signatureValue?: string; // Base64 signature value
+  signedInfoXml?: string; // The XML string of the SignedInfo element
+  rawXml?: string; // The full raw XML of the signature
+  canonicalizationMethod?: string; // The canonicalization method used
 }
 
 /**
@@ -70,11 +74,10 @@ export function parseEdoc(edocBuffer: Uint8Array): EdocContainer {
       if (sigContent) {
         try {
           // Parse signatures from the file - could contain multiple
-          const fileSignatures = parseSignatureFile(sigContent, sigFile);
-          signatures.push(...fileSignatures);
-          console.log(
-            `Found ${fileSignatures.length} signatures in ${sigFile}`,
-          );
+          const fileSignature = parseSignatureFile(sigContent, sigFile);
+          if (fileSignature) {
+            signatures.push(fileSignature);
+          }
         } catch (error) {
           console.error(`Error parsing signature ${sigFile}:`, error);
         }
@@ -93,20 +96,20 @@ export function parseEdoc(edocBuffer: Uint8Array): EdocContainer {
 }
 
 /**
- * Parse a signature file that may contain multiple signatures
+ * Parse a signature file that contains a single signature
  * @param xmlContent The XML file content
  * @param filename The filename (for reference)
- * @returns Array of parsed signatures
+ * @returns The parsed signature with raw XML content
  */
 function parseSignatureFile(
   xmlContent: Uint8Array,
   filename: string,
-): SignatureInfo[] {
+): SignatureInfo | null {
   const text = new TextDecoder().decode(xmlContent);
   const parser = createXMLParser();
   const xmlDoc = parser.parseFromString(text, "application/xml");
 
-  // Using our querySelector helper to find signatures (similar to browser code)
+  // Using our querySelector helper to find the signature element
   const signatureElements = querySelectorAll(
     xmlDoc,
     "ds\\:Signature, Signature",
@@ -123,17 +126,15 @@ function parseSignatureFile(
       // Try direct DOM traversal
       if (rootElement) {
         // Look for Signature elements as direct children
-        const directSignatures = querySelectorAll(
+        const directSignature = querySelector(
           rootElement,
           "ds\\:Signature, Signature",
         );
-        if (directSignatures.length > 0) {
-          console.log(
-            `Found ${directSignatures.length} signature elements by direct traversal`,
-          );
-          return directSignatures.map((sig) =>
-            parseSignatureElement(sig, xmlDoc),
-          );
+        if (directSignature) {
+          console.log(`Found signature element by direct traversal`);
+          let signatureInfo = parseSignatureElement(directSignature, xmlDoc);
+          signatureInfo.rawXml = text;
+          return signatureInfo;
         }
       }
 
@@ -141,20 +142,24 @@ function parseSignatureFile(
       console.log("Attempting fallback text parsing");
       const mockSignature = parseBasicSignatureFromText(text);
       if (mockSignature) {
-        return [mockSignature];
+        return {
+          ...mockSignature,
+          rawXml: text,
+        };
       }
     }
 
-    return [];
+    return null;
   }
 
-  console.log(
-    `Found ${signatureElements.length} signature elements, parsing...`,
-  );
+  console.log(`Found signature element, parsing...`);
 
-  // Parse each signature
-  return signatureElements.map((sig) => parseSignatureElement(sig, xmlDoc));
+  // Parse the signature and add the raw XML
+  let signatureInfo = parseSignatureElement(signatureElements[0], xmlDoc);
+  signatureInfo.rawXml = text;
+  return signatureInfo;
 }
+
 /**
  * Find signature files in the eDoc container
  * @param files Map of filenames to file contents
@@ -216,6 +221,41 @@ function parseSignatureElement(
   if (!signedInfo) {
     throw new Error("SignedInfo element not found");
   }
+
+  // Get the canonicalization method
+  const c14nMethodEl = querySelector(
+    signedInfo,
+    "ds\\:CanonicalizationMethod, CanonicalizationMethod",
+  );
+  let canonicalizationMethod = CANONICALIZATION_METHODS.default;
+  if (c14nMethodEl) {
+    canonicalizationMethod =
+      c14nMethodEl.getAttribute("Algorithm") || canonicalizationMethod;
+  }
+
+  // Serialize the SignedInfo element to XML string
+  let signedInfoXml = "";
+  try {
+    // Try to use XMLSerializer if available
+    if (typeof XMLSerializer !== "undefined") {
+      signedInfoXml = new XMLSerializer().serializeToString(signedInfo);
+    } else if (typeof window !== "undefined" && window.XMLSerializer) {
+      signedInfoXml = new window.XMLSerializer().serializeToString(signedInfo);
+    } else {
+      // Fallback for Node.js environment
+      try {
+        const { JSDOM } = require("jsdom");
+        const dom = new JSDOM();
+        const serializer = new dom.window.XMLSerializer();
+        signedInfoXml = serializer.serializeToString(signedInfo);
+      } catch (e) {
+        console.warn("Could not serialize SignedInfo:", e);
+      }
+    }
+  } catch (e) {
+    console.warn("Could not serialize SignedInfo element:", e);
+  }
+  console.log("signedInfoXml", signedInfoXml);
 
   // Get signature method
   const signatureMethod = querySelector(
@@ -349,6 +389,8 @@ function parseSignatureElement(
     references,
     algorithm: signatureAlgorithm,
     signatureValue,
+    signedInfoXml,
+    canonicalizationMethod,
   };
 }
 
