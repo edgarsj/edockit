@@ -28,3 +28,7 @@ Thumbs.db
 
 # Testing
 coverage/
+
+# Ignore sensitive test fixtures but keep the directory structure
+tests/fixtures/sensitive/*
+!tests/fixtures/sensitive/.gitkeep
