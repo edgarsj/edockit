@@ -1,5 +1,5 @@
-import { createHash } from "crypto";
 import { X509Certificate } from "@peculiar/x509";
+// Import crypto dynamically only when needed in Node environment
 import { checkCertificateValidity, CertificateInfo, parseCertificate } from "./certificate";
 import { createXMLParser } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
@@ -60,12 +60,24 @@ export interface VerificationResult {
 }
 
 /**
- * Compute a digest (hash) of file content
+ * Detects if code is running in a browser environment
+ * @returns true if in browser, false otherwise
+ */
+function isBrowser(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.crypto !== "undefined" &&
+    typeof window.crypto.subtle !== "undefined"
+  );
+}
+
+/**
+ * Compute a digest (hash) of file content with browser/node compatibility
  * @param fileContent The file content as Uint8Array
  * @param algorithm The digest algorithm to use (e.g., 'SHA-256')
- * @returns Base64-encoded digest
+ * @returns Promise with Base64-encoded digest
  */
-export function computeDigest(fileContent: Uint8Array, algorithm: string): string {
+export async function computeDigest(fileContent: Uint8Array, algorithm: string): Promise<string> {
   // Normalize algorithm name
   const normalizedAlgo = algorithm.replace(/-/g, "").toLowerCase();
   let hashAlgo: string;
@@ -83,22 +95,76 @@ export function computeDigest(fileContent: Uint8Array, algorithm: string): strin
     throw new Error(`Unsupported digest algorithm: ${algorithm}`);
   }
 
-  // Compute the digest
-  const hash = createHash(hashAlgo);
-  hash.update(fileContent);
-  return hash.digest("base64");
+  if (isBrowser()) {
+    return browserDigest(fileContent, hashAlgo);
+  } else {
+    return nodeDigest(fileContent, hashAlgo);
+  }
+}
+
+/**
+ * Compute digest using Web Crypto API in browser
+ * @param fileContent Uint8Array of file content
+ * @param hashAlgo Normalized hash algorithm name
+ * @returns Promise with Base64-encoded digest
+ */
+async function browserDigest(fileContent: Uint8Array, hashAlgo: string): Promise<string> {
+  // Map to Web Crypto API algorithm names
+  const browserAlgoMap: Record<string, string> = {
+    sha1: "SHA-1",
+    sha256: "SHA-256",
+    sha384: "SHA-384",
+    sha512: "SHA-512",
+  };
+
+  const browserAlgo = browserAlgoMap[hashAlgo];
+  if (!browserAlgo) {
+    throw new Error(`Unsupported browser digest algorithm: ${hashAlgo}`);
+  }
+
+  const hashBuffer = await window.crypto.subtle.digest(browserAlgo, fileContent);
+
+  // Convert ArrayBuffer to Base64
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashBase64 = btoa(String.fromCharCode.apply(null, hashArray));
+
+  return hashBase64;
+}
+
+/**
+ * Compute digest using Node.js crypto module
+ * @param fileContent Uint8Array of file content
+ * @param hashAlgo Normalized hash algorithm name
+ * @returns Promise with Base64-encoded digest
+ */
+function nodeDigest(fileContent: Uint8Array, hashAlgo: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      // Dynamically import Node.js crypto
+      const crypto = require("crypto");
+      const hash = crypto.createHash(hashAlgo);
+      hash.update(Buffer.from(fileContent));
+      resolve(hash.digest("base64"));
+    } catch (error) {
+      reject(
+        new Error(
+          `Node digest computation failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }
+  });
 }
 
 /**
  * Verify checksums of files against signature
  * @param signature The signature information
  * @param files Map of filenames to file contents
- * @returns Verification results for each file
+ * @returns Promise with verification results for each file
  */
-export function verifyChecksums(
+export async function verifyChecksums(
   signature: { signedChecksums: Record<string, string>; algorithm?: string },
   files: Map<string, Uint8Array>,
-): ChecksumVerificationResult {
+): Promise<ChecksumVerificationResult> {
   const results: Record<
     string,
     {
@@ -123,63 +189,67 @@ export function verifyChecksums(
     }
   }
 
-  // Verify each checksum
-  for (const [filename, expectedChecksum] of Object.entries(signature.signedChecksums)) {
-    // Check if file exists in the container
-    const fileContent = files.get(filename);
+  const checksumPromises = Object.entries(signature.signedChecksums).map(
+    async ([filename, expectedChecksum]) => {
+      // Check if file exists in the container
+      const fileContent = files.get(filename);
 
-    if (!fileContent) {
-      // File not found - this could be due to URI encoding or path format
-      // Try to find by file basename
-      const basename = filename.includes("/") ? filename.split("/").pop() : filename;
+      if (!fileContent) {
+        // File not found - this could be due to URI encoding or path format
+        // Try to find by file basename
+        const basename = filename.includes("/") ? filename.split("/").pop() : filename;
 
-      let foundMatch = false;
-      if (basename) {
-        for (const [containerFilename, content] of files.entries()) {
-          if (containerFilename.endsWith(basename)) {
-            // Found a match by basename
-            const actualChecksum = computeDigest(content, digestAlgorithm);
-            const matches = expectedChecksum === actualChecksum;
+        let foundMatch = false;
+        if (basename) {
+          for (const [containerFilename, content] of files.entries()) {
+            if (containerFilename.endsWith(basename)) {
+              // Found a match by basename
+              const actualChecksum = await computeDigest(content, digestAlgorithm);
+              const matches = expectedChecksum === actualChecksum;
 
-            results[filename] = {
-              expected: expectedChecksum,
-              actual: actualChecksum,
-              matches,
-              fileFound: true,
-            };
+              results[filename] = {
+                expected: expectedChecksum,
+                actual: actualChecksum,
+                matches,
+                fileFound: true,
+              };
 
-            if (!matches) allValid = false;
-            foundMatch = true;
-            break;
+              if (!matches) allValid = false;
+              foundMatch = true;
+              break;
+            }
           }
         }
-      }
 
-      if (!foundMatch) {
-        // Really not found
+        if (!foundMatch) {
+          // Really not found
+          results[filename] = {
+            expected: expectedChecksum,
+            actual: "",
+            matches: false,
+            fileFound: false,
+          };
+          allValid = false;
+        }
+      } else {
+        // File found directly - verify checksum
+        const actualChecksum = await computeDigest(fileContent, digestAlgorithm);
+        const matches = expectedChecksum === actualChecksum;
+
         results[filename] = {
           expected: expectedChecksum,
-          actual: "",
-          matches: false,
-          fileFound: false,
+          actual: actualChecksum,
+          matches,
+          fileFound: true,
         };
-        allValid = false;
+
+        if (!matches) allValid = false;
       }
-    } else {
-      // File found directly - verify checksum
-      const actualChecksum = computeDigest(fileContent, digestAlgorithm);
-      const matches = expectedChecksum === actualChecksum;
+    },
+  );
 
-      results[filename] = {
-        expected: expectedChecksum,
-        actual: actualChecksum,
-        matches,
-        fileFound: true,
-      };
-
-      if (!matches) allValid = false;
-    }
-  }
+  // Wait for all checksums to be verified
+  await Promise.all(checksumPromises);
 
   return {
     isValid: allValid,
@@ -218,8 +288,42 @@ export async function verifyCertificate(
 }
 
 /**
+ * Safely get the crypto.subtle implementation in either browser or Node.js
+ * @returns The SubtleCrypto interface
+ */
+function getCryptoSubtle(): SubtleCrypto {
+  if (isBrowser()) {
+    return window.crypto.subtle;
+  } else {
+    // In Node.js environment
+    return crypto.subtle;
+  }
+}
+
+/**
+ * Base64 decode a string in a cross-platform way
+ * @param base64 Base64 encoded string
+ * @returns Uint8Array of decoded bytes
+ */
+function base64ToUint8Array(base64: string): Uint8Array {
+  if (typeof atob === "function") {
+    // Browser approach
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  } else {
+    // Node.js approach
+    const buffer = Buffer.from(base64, "base64");
+    return new Uint8Array(buffer);
+  }
+}
+
+/**
  * Verify the XML signature specifically using SignedInfo and SignatureValue
- * @param signedInfoXml The XML string of the SignedInfo element
+ * @param signatureXml The XML string of the SignedInfo element
  * @param signatureValue The base64-encoded signature value
  * @param publicKeyData The public key raw data
  * @param algorithm Key algorithm details
@@ -254,10 +358,6 @@ export async function verifySignedInfo(
     // Canonicalize the SignedInfo element
     const canonicalizer = XMLCanonicalizer.fromMethod(c14nMethod);
     const canonicalizedSignedInfo = canonicalizer.canonicalize(signedInfo as any);
-    // console.log(`full rawXML:"""\n${signatureXml}\n"""`);
-    // console.log(
-    //   `Canonicalized SignedInfo:"""\n${canonicalizedSignedInfo}\n"""`,
-    // );
 
     // Clean up signature value (remove whitespace)
     const cleanSignatureValue = signatureValue.replace(/\s+/g, "");
@@ -266,14 +366,7 @@ export async function verifySignedInfo(
     let signatureBytes: Uint8Array;
 
     try {
-      // Browser approach
-      if (typeof atob === "function") {
-        signatureBytes = Uint8Array.from(atob(cleanSignatureValue), (c) => c.charCodeAt(0));
-      } else {
-        // Node.js approach
-        const buffer = Buffer.from(cleanSignatureValue, "base64");
-        signatureBytes = new Uint8Array(buffer);
-      }
+      signatureBytes = base64ToUint8Array(cleanSignatureValue);
     } catch (error) {
       return {
         isValid: false,
@@ -284,9 +377,8 @@ export async function verifySignedInfo(
     // Import the public key
     let publicKey;
     try {
-      publicKey = await crypto.subtle.importKey("spki", publicKeyData, algorithm, false, [
-        "verify",
-      ]);
+      const subtle = getCryptoSubtle();
+      publicKey = await subtle.importKey("spki", publicKeyData, algorithm, false, ["verify"]);
     } catch (error) {
       return {
         isValid: false,
@@ -298,7 +390,8 @@ export async function verifySignedInfo(
     const signedData = new TextEncoder().encode(canonicalizedSignedInfo);
 
     try {
-      const result = await crypto.subtle.verify(algorithm, publicKey, signatureBytes, signedData);
+      const subtle = getCryptoSubtle();
+      const result = await subtle.verify(algorithm, publicKey, signatureBytes, signedData);
 
       return {
         isValid: result,
@@ -341,7 +434,7 @@ export async function verifySignature(
   // Verify checksums
   const checksumResult =
     options.verifyChecksums !== false
-      ? verifyChecksums(signatureInfo, files)
+      ? await verifyChecksums(signatureInfo, files)
       : { isValid: true, details: {} };
 
   // Verify XML signature if we have the necessary components
@@ -383,7 +476,7 @@ export async function verifySignature(
   } else if (options.verifySignatures !== false) {
     // Missing information for signature verification
     const missingComponents = [];
-    if (!signatureInfo.signedInfoXml) missingComponents.push("SignedInfo XML");
+    if (!signatureInfo.rawXml) missingComponents.push("Signature XML");
     if (!signatureInfo.signatureValue) missingComponents.push("SignatureValue");
     if (!signatureInfo.publicKey) missingComponents.push("Public Key");
 
@@ -395,7 +488,7 @@ export async function verifySignature(
   }
 
   // Determine overall validity
-  let isValid = certResult.isValid && checksumResult.isValid && signatureResult.isValid;
+  const isValid = certResult.isValid && checksumResult.isValid && signatureResult.isValid;
 
   // Return the complete result
   return {

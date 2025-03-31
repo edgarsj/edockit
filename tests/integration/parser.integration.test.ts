@@ -8,10 +8,7 @@ import {
 } from "../../src/core/certificate";
 import { verifyChecksums, verifySignature } from "../../src/core/verification";
 
-const realSampleEdocFilePath = join(
-  __dirname,
-  "../fixtures/sensitive/Sample File.edoc",
-);
+const realSampleEdocFilePath = join(__dirname, "../fixtures/sensitive/Sample File.edoc");
 const realSampleEdocfileExists = existsSync(realSampleEdocFilePath);
 
 describe("eDoc Parser and Verification Tests", () => {
@@ -49,10 +46,7 @@ describe("eDoc Parser and Verification Tests", () => {
       console.log("- Has SignedInfo XML:", !!signature.signedInfoXml);
       console.log("- Has SignatureValue:", !!signature.signatureValue);
       console.log("- Has Public Key:", !!signature.publicKey);
-      console.log(
-        "- Canonicalization Method:",
-        signature.canonicalizationMethod || "default",
-      );
+      console.log("- Canonicalization Method:", signature.canonicalizationMethod || "default");
 
       // Parse and verify the certificate
       if (signature.certificatePEM) {
@@ -73,21 +67,18 @@ describe("eDoc Parser and Verification Tests", () => {
 
         // Verify certificate and signature information exists
         expect(
-          certInfo.subject.commonName ||
-            (certInfo.subject.givenName && certInfo.subject.surname),
+          certInfo.subject.commonName || (certInfo.subject.givenName && certInfo.subject.surname),
         ).toBeTruthy();
         expect(certInfo.subject.country).toBeTruthy();
         expect(certInfo.issuer.commonName).toBeTruthy();
       }
 
       // Verify checksums
-      const checksumResults = verifyChecksums(signature, container.files);
+      const checksumResults = await verifyChecksums(signature, container.files);
       console.log("\nChecksum verification:");
       console.log("- All checksums valid:", checksumResults.isValid);
 
-      for (const [filename, result] of Object.entries(
-        checksumResults.details,
-      )) {
+      for (const [filename, result] of Object.entries(checksumResults.details)) {
         console.log(
           `- ${filename}: ${result.matches ? "✓" : "✗"} ${result.fileFound ? "" : "(file not found)"}`,
         );
@@ -98,30 +89,17 @@ describe("eDoc Parser and Verification Tests", () => {
 
       // Perform a complete signature verification
       console.log("\nPerforming complete signature verification...");
-      const verificationResult = await verifySignature(
-        signature,
-        container.files,
-        {
-          verifyTime: signature.signingTime,
-        },
-      );
+      const verificationResult = await verifySignature(signature, container.files, {
+        verifyTime: signature.signingTime,
+      });
 
       console.log("\nVerification result:");
       console.log("- Overall validity:", verificationResult.isValid);
-      console.log(
-        "- Certificate valid:",
-        verificationResult.certificate.isValid,
-      );
+      console.log("- Certificate valid:", verificationResult.certificate.isValid);
 
       if (verificationResult.signature) {
-        console.log(
-          "- XML Signature valid:",
-          verificationResult.signature.isValid,
-        );
-        if (
-          !verificationResult.signature.isValid &&
-          verificationResult.signature.reason
-        ) {
+        console.log("- XML Signature valid:", verificationResult.signature.isValid);
+        if (!verificationResult.signature.isValid && verificationResult.signature.reason) {
           console.log("  Reason:", verificationResult.signature.reason);
         }
       }
