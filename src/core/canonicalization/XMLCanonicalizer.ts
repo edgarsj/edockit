@@ -93,12 +93,12 @@ interface NodeListOf<T> {
 // Define these constants as they're used in the code
 const NODE_TYPES = {
   ELEMENT_NODE: 1,
-  TEXT_NODE: 3
+  TEXT_NODE: 3,
 };
 
 class XMLCanonicalizer {
   private method: CanonMethod;
-  
+
   constructor(method: CanonMethod = methods.c14n) {
     this.method = method;
   }
@@ -133,7 +133,10 @@ class XMLCanonicalizer {
       .replace(/'/g, "&apos;");
   }
 
-  static collectNamespaces(node: Node, visibleNamespaces = new Map<string, string>()): Map<string, string> {
+  static collectNamespaces(
+    node: Node,
+    visibleNamespaces = new Map<string, string>(),
+  ): Map<string, string> {
     let current: Node | undefined = node;
     while (current && current.nodeType === NODE_TYPES.ELEMENT_NODE) {
       if (current.attributes) {
@@ -183,13 +186,11 @@ class XMLCanonicalizer {
 
       // Handle namespaces for root element
       if (options.isStartingNode) {
-        const nsEntries = Array.from(visibleNamespaces.entries()).sort(
-          (a, b) => {
-            if (a[0] === "") return -1;
-            if (b[0] === "") return 1;
-            return a[0].localeCompare(b[0]);
-          },
-        );
+        const nsEntries = Array.from(visibleNamespaces.entries()).sort((a, b) => {
+          if (a[0] === "") return -1;
+          if (b[0] === "") return 1;
+          return a[0].localeCompare(b[0]);
+        });
 
         for (const [prefix, uri] of nsEntries) {
           if (prefix === "") {

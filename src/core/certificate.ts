@@ -92,10 +92,7 @@ export function extractSignerInfo(certificate: X509Certificate): {
 
   // Approach 1: Try direct access to typed subject properties
   try {
-    if (
-      typeof certificate.subject === "object" &&
-      certificate.subject !== null
-    ) {
+    if (typeof certificate.subject === "object" && certificate.subject !== null) {
       // Handle subject properties
       const subject = certificate.subject as any;
       result.commonName = subject.commonName;
@@ -140,10 +137,8 @@ export function extractSignerInfo(certificate: X509Certificate): {
       const issuerParts = issuerStr.split(",");
       for (const part of issuerParts) {
         const [key, value] = part.trim().split("=");
-        if (key === "CN")
-          result.issuer.commonName = result.issuer.commonName || value;
-        if (key === "O")
-          result.issuer.organization = result.issuer.organization || value;
+        if (key === "CN") result.issuer.commonName = result.issuer.commonName || value;
+        if (key === "O") result.issuer.organization = result.issuer.organization || value;
         if (key === "C") result.issuer.country = result.issuer.country || value;
       }
     }
@@ -153,21 +148,16 @@ export function extractSignerInfo(certificate: X509Certificate): {
 
   // Approach 3: Try to use getField method if available
   try {
-    if (
-      "subjectName" in certificate &&
-      (certificate as any).subjectName?.getField
-    ) {
+    if ("subjectName" in certificate && (certificate as any).subjectName?.getField) {
       const subjectName = (certificate as any).subjectName;
       // Only set if not already set from previous approaches
       result.commonName = result.commonName || subjectName.getField("CN")?.[0];
       result.surname = result.surname || subjectName.getField("SN")?.[0];
       result.givenName = result.givenName || subjectName.getField("G")?.[0];
       result.serialNumber =
-        result.serialNumber ||
-        subjectName.getField("2.5.4.5")?.[0]?.replace("PNOLV-", "");
+        result.serialNumber || subjectName.getField("2.5.4.5")?.[0]?.replace("PNOLV-", "");
       result.country = result.country || subjectName.getField("C")?.[0];
-      result.organization =
-        result.organization || subjectName.getField("O")?.[0];
+      result.organization = result.organization || subjectName.getField("O")?.[0];
     }
   } catch (e) {
     console.warn("Could not extract fields using getField method:", e);
@@ -186,9 +176,7 @@ export function extractSignerInfo(certificate: X509Certificate): {
  * @param certData Base64-encoded certificate data
  * @returns Parsed certificate information
  */
-export async function parseCertificate(
-  certData: string,
-): Promise<CertificateInfo> {
+export async function parseCertificate(certData: string): Promise<CertificateInfo> {
   try {
     let pemCert = certData;
 
@@ -218,8 +206,7 @@ export async function parseCertificate(
   } catch (error) {
     console.error("Certificate parsing error:", error);
     throw new Error(
-      "Failed to parse certificate: " +
-        (error instanceof Error ? error.message : String(error)),
+      "Failed to parse certificate: " + (error instanceof Error ? error.message : String(error)),
     );
   }
 }

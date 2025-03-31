@@ -1,17 +1,10 @@
 import { unzipSync } from "fflate";
 import { X509Certificate } from "@peculiar/x509";
-import {
-  createXMLParser,
-  querySelector,
-  querySelectorAll,
-} from "../utils/xmlParser";
+import { createXMLParser, querySelector, querySelectorAll } from "../utils/xmlParser";
 import { CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { extractSignerInfo } from "./certificate";
 
-import {
-  parseSignatureFile,
-  findSignatureFiles,
-} from "./parser/signatureParser";
+import { parseSignatureFile, findSignatureFiles } from "./parser/signatureParser";
 import type { EdocContainer, SignatureInfo } from "./parser/types";
 
 export { EdocContainer, SignatureInfo };

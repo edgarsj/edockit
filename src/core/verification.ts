@@ -1,15 +1,8 @@
 import { createHash } from "crypto";
 import { X509Certificate } from "@peculiar/x509";
-import {
-  checkCertificateValidity,
-  CertificateInfo,
-  parseCertificate,
-} from "./certificate";
+import { checkCertificateValidity, CertificateInfo, parseCertificate } from "./certificate";
 import { createXMLParser } from "../utils/xmlParser";
-import {
-  XMLCanonicalizer,
-  CANONICALIZATION_METHODS,
-} from "./canonicalization/XMLCanonicalizer";
+import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
 
 /**
@@ -72,10 +65,7 @@ export interface VerificationResult {
  * @param algorithm The digest algorithm to use (e.g., 'SHA-256')
  * @returns Base64-encoded digest
  */
-export function computeDigest(
-  fileContent: Uint8Array,
-  algorithm: string,
-): string {
+export function computeDigest(fileContent: Uint8Array, algorithm: string): string {
   // Normalize algorithm name
   const normalizedAlgo = algorithm.replace(/-/g, "").toLowerCase();
   let hashAlgo: string;
@@ -134,18 +124,14 @@ export function verifyChecksums(
   }
 
   // Verify each checksum
-  for (const [filename, expectedChecksum] of Object.entries(
-    signature.signedChecksums,
-  )) {
+  for (const [filename, expectedChecksum] of Object.entries(signature.signedChecksums)) {
     // Check if file exists in the container
     const fileContent = files.get(filename);
 
     if (!fileContent) {
       // File not found - this could be due to URI encoding or path format
       // Try to find by file basename
-      const basename = filename.includes("/")
-        ? filename.split("/").pop()
-        : filename;
+      const basename = filename.includes("/") ? filename.split("/").pop() : filename;
 
       let foundMatch = false;
       if (basename) {
@@ -274,9 +260,7 @@ export async function verifyXMLSignature(
 
     // Canonicalize the SignedInfo element
     const canonicalizer = XMLCanonicalizer.fromMethod(c14nMethod);
-    const canonicalizedSignedInfo = canonicalizer.canonicalize(
-      signedInfo as any,
-    );
+    const canonicalizedSignedInfo = canonicalizer.canonicalize(signedInfo as any);
 
     // Get signature value
     const signatureValueEl =
@@ -287,22 +271,15 @@ export async function verifyXMLSignature(
       return { isValid: false, reason: "SignatureValue element not found" };
     }
 
-    const signatureValue =
-      signatureValueEl.textContent?.replace(/\s+/g, "") || "";
+    const signatureValue = signatureValueEl.textContent?.replace(/\s+/g, "") || "";
 
     // Convert base64 signature to binary
-    const signatureBytes = Uint8Array.from(atob(signatureValue), (c) =>
-      c.charCodeAt(0),
-    );
+    const signatureBytes = Uint8Array.from(atob(signatureValue), (c) => c.charCodeAt(0));
 
     // Import the public key
-    const publicKey = await crypto.subtle.importKey(
-      "spki",
-      publicKeyData,
-      algorithm,
-      false,
-      ["verify"],
-    );
+    const publicKey = await crypto.subtle.importKey("spki", publicKeyData, algorithm, false, [
+      "verify",
+    ]);
 
     // Verify the signature
     const signedData = new TextEncoder().encode(canonicalizedSignedInfo);
@@ -357,14 +334,11 @@ export async function verifySignedInfo(
     }
 
     // Determine canonicalization method
-    const c14nMethod =
-      canonicalizationMethod || "http://www.w3.org/2001/10/xml-exc-c14n#";
+    const c14nMethod = canonicalizationMethod || "http://www.w3.org/2001/10/xml-exc-c14n#";
 
     // Canonicalize the SignedInfo element
     const canonicalizer = XMLCanonicalizer.fromMethod(c14nMethod);
-    const canonicalizedSignedInfo = canonicalizer.canonicalize(
-      signedInfo as any,
-    );
+    const canonicalizedSignedInfo = canonicalizer.canonicalize(signedInfo as any);
     // console.log(`full rawXML:"""\n${signatureXml}\n"""`);
     // console.log(
     //   `Canonicalized SignedInfo:"""\n${canonicalizedSignedInfo}\n"""`,
@@ -379,9 +353,7 @@ export async function verifySignedInfo(
     try {
       // Browser approach
       if (typeof atob === "function") {
-        signatureBytes = Uint8Array.from(atob(cleanSignatureValue), (c) =>
-          c.charCodeAt(0),
-        );
+        signatureBytes = Uint8Array.from(atob(cleanSignatureValue), (c) => c.charCodeAt(0));
       } else {
         // Node.js approach
         const buffer = Buffer.from(cleanSignatureValue, "base64");
@@ -397,13 +369,9 @@ export async function verifySignedInfo(
     // Import the public key
     let publicKey;
     try {
-      publicKey = await crypto.subtle.importKey(
-        "spki",
-        publicKeyData,
-        algorithm,
-        false,
-        ["verify"],
-      );
+      publicKey = await crypto.subtle.importKey("spki", publicKeyData, algorithm, false, [
+        "verify",
+      ]);
     } catch (error) {
       return {
         isValid: false,
@@ -415,12 +383,7 @@ export async function verifySignedInfo(
     const signedData = new TextEncoder().encode(canonicalizedSignedInfo);
 
     try {
-      const result = await crypto.subtle.verify(
-        algorithm,
-        publicKey,
-        signatureBytes,
-        signedData,
-      );
+      const result = await crypto.subtle.verify(algorithm, publicKey, signatureBytes, signedData);
 
       return {
         isValid: result,
@@ -500,9 +463,7 @@ export async function verifySignature(
     );
 
     if (!signatureResult.isValid) {
-      errors.push(
-        signatureResult.reason || "XML signature verification failed",
-      );
+      errors.push(signatureResult.reason || "XML signature verification failed");
     }
   } else if (options.verifySignatures !== false) {
     // Missing information for signature verification
@@ -511,9 +472,7 @@ export async function verifySignature(
     if (!signatureInfo.signatureValue) missingComponents.push("SignatureValue");
     if (!signatureInfo.publicKey) missingComponents.push("Public Key");
 
-    errors.push(
-      `Cannot verify XML signature: missing ${missingComponents.join(", ")}`,
-    );
+    errors.push(`Cannot verify XML signature: missing ${missingComponents.join(", ")}`);
     signatureResult = {
       isValid: false,
       reason: `Missing required components: ${missingComponents.join(", ")}`,
@@ -521,8 +480,7 @@ export async function verifySignature(
   }
 
   // Determine overall validity
-  let isValid =
-    certResult.isValid && checksumResult.isValid && signatureResult.isValid;
+  let isValid = certResult.isValid && checksumResult.isValid && signatureResult.isValid;
 
   // Return the complete result
   return {

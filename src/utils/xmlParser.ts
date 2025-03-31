@@ -39,10 +39,7 @@ export function createXMLParser(): XMLParserInterface {
  * @param selector A CSS-like selector (with namespace handling)
  * @returns The found element or null
  */
-export function querySelector(
-  parent: Document | Element,
-  selector: string,
-): Element | null {
+export function querySelector(parent: Document | Element, selector: string): Element | null {
   // First check if the environment supports querySelector natively
   if (typeof parent.querySelector === "function") {
     try {
@@ -75,10 +72,7 @@ export function querySelector(
       if (isDocument) {
         try {
           // Try with wildcard namespace
-          const nsElements = (parent as Document).getElementsByTagNameNS(
-            "*",
-            localName,
-          );
+          const nsElements = (parent as Document).getElementsByTagNameNS("*", localName);
           if (nsElements.length > 0) {
             return nsElements[0] as Element;
           }
@@ -98,10 +92,7 @@ export function querySelector(
  * @param selector A CSS-like selector (with namespace handling)
  * @returns Array of matching elements
  */
-export function querySelectorAll(
-  parent: Document | Element,
-  selector: string,
-): Element[] {
+export function querySelectorAll(parent: Document | Element, selector: string): Element[] {
   const results: Element[] = [];
 
   // First check if the environment supports querySelectorAll natively
@@ -142,10 +133,7 @@ export function querySelectorAll(
       if (isDocument) {
         try {
           // Try with wildcard namespace
-          const nsElements = (parent as Document).getElementsByTagNameNS(
-            "*",
-            localName,
-          );
+          const nsElements = (parent as Document).getElementsByTagNameNS("*", localName);
           for (let i = 0; i < nsElements.length; i++) {
             if (!results.includes(nsElements[i] as Element)) {
               results.push(nsElements[i] as Element);
