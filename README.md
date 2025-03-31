@@ -1,12 +1,12 @@
 # edockit
 
-A JavaScript/TypeScript library for viewing and verifying Latvian eDoc signatures. Works in both browser and Node.js environments.
+A JavaScript/TypeScript library for viewing and verifying EU standard ASiC-E containers (including Latvian eDoc files, which use the same format with a different extension). Works in both browser and Node.js environments.
 
-> **Disclaimer:** This is my first TypeScript/JavaScript library package. I welcome collaborators, feedback, and contributions to help improve it!
+> **Note: Work in Progress** - This library is under active development and requires more real-world testing with various ASiC-E implementations from different European countries. If you have sample files or encounter issues, please contribute!
 
 ## About
 
-This library supports both Latvian eDoc (.edoc) files and standard EU ASiC-E (.asice) containers, as they share the same underlying format. The library has been primarily tested on real Latvian eDoc files that were available.
+This library supports standard European ASiC-E (.asice) containers as defined by the ETSI standards. Latvian eDoc (.edoc) files are effectively ASiC-E containers with a different file extension, so they are also supported. While the core functionality exists, extensive testing with real-world documents from various EU countries is still needed to ensure complete compatibility across different implementations.
 
 ## Installation
 
@@ -23,9 +23,9 @@ npm install jsdom
 ```typescript
 import { parseEdoc, verifySignature } from 'edockit';
 
-// Parse an eDoc file
-const edocBuffer = new Uint8Array(/* your eDoc file */);
-const container = parseEdoc(edocBuffer);
+// Parse an ASiC-E/eDoc file
+const containerBuffer = new Uint8Array(/* your ASiC-E or eDoc file */);
+const container = parseEdoc(containerBuffer);
 
 // Get information about signatures
 console.log('Files in container:', Array.from(container.files.keys()));
@@ -40,10 +40,19 @@ for (const signature of container.signatures) {
 
 ## Features
 
-- List files contained in eDoc/ASiC-E container
+- Support for EU standard ASiC-E containers and Latvian eDoc files/containers (same format, different extension)
+- List files contained in ASiC-E/eDoc container
 - Extract and display signature information
 - Verify XML signatures against file checksums
 - Validate certificate validity
+
+## Testing Status
+
+The library has been tested with a limited set of real Latvian eDoc files (which are ASiC-E containers with a .edoc extension). More testing is needed with:
+- ASiC-E containers from different EU countries
+- Files created with different software implementations
+- Various signature algorithms and certificate types
+- Edge cases and non-standard implementations
 
 ## Browser Extension Usage
 
@@ -60,9 +69,14 @@ For browser extensions, use the UMD build:
 
 ## Contributing
 
-Contributions are very welcome! If you encounter any issues, please open an issue on GitHub.
+Contributions are highly encouraged! The library needs more real-world testing to improve compatibility and robustness. In particular:
 
-If you find files that don't work with this library, please consider adding them as examples in your issue report (if possible), as this will help tremendously with debugging and improving compatibility.
+1. Testing with ASiC-E containers from different European countries
+2. Bug reports with sample files (when possible)
+3. Feature requests for specific EU country implementations
+4. Documentation improvements
+
+If you encounter any issues, please open an issue on GitHub. Including sample files with your issue report (if possible) will help tremendously with debugging and improving compatibility.
 
 ## License
 
