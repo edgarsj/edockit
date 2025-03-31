@@ -7,9 +7,7 @@ const { parseSignatureElement } = __test__;
 
 // maybe remove the serialization in implementation or test separately
 global.XMLSerializer = jest.fn().mockImplementation(() => ({
-  serializeToString: jest
-    .fn()
-    .mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
+  serializeToString: jest.fn().mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
 }));
 
 // Mock the certificate module
@@ -142,14 +140,9 @@ describe("Signature Parser", () => {
     expect(result.certificate).toBe("MockCertificateBase64==");
     expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
     expect(result.signatureValue).toBe("MockSignatureValueBase64==");
-    expect(result.algorithm).toBe(
-      "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
-    );
+    expect(result.algorithm).toBe("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
 
     // Verify that querySelector was called with the right parameters
-    expect(querySelector).toHaveBeenCalledWith(
-      mockSignatureElement,
-      "ds\\:SignedInfo, SignedInfo",
-    );
+    expect(querySelector).toHaveBeenCalledWith(mockSignatureElement, "ds\\:SignedInfo, SignedInfo");
   });
 });

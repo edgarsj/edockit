@@ -17,8 +17,8 @@
     "cy:open": "cypress open",
     "cy:run": "cypress run",
     "test:browser": "cypress run --component",
-    "format": "prettier --write 'src/**/*.{ts,js}'",
-    "format:check": "prettier --check 'src/**/*.{ts,js}'"
+    "format": "prettier --write '**/*.{ts,js}'",
+    "format:check": "prettier --check '**/*.{ts,js}'"
   },
   "keywords": [
     "edoc",
