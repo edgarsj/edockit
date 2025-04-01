@@ -1,9 +1,11 @@
 // src/core/parser/types.ts
 import { X509Certificate } from "@peculiar/x509";
 
-// Types for the parsed eDoc container
 export interface EdocContainer {
   files: Map<string, Uint8Array>;
+  documentFileList: string[]; // All top folder files except metadata
+  metadataFileList: string[]; // metadata and META-INF/* files
+  signedFileList: string[]; // Files referenced by at least one signature
   signatures: SignatureInfo[];
 }
 

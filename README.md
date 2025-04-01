@@ -33,7 +33,7 @@ console.log('Signatures:', container.signatures);
 
 // Verify signatures
 for (const signature of container.signatures) {
-  const result = verifySignature(signature, container.files);
+  const result = await verifySignature(signature, container.files);
   console.log(`Signature ${signature.id} is ${result.isValid ? 'valid' : 'invalid'}`);
 }
 ```

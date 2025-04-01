@@ -12,22 +12,33 @@ export { EdocContainer, SignatureInfo };
 /**
  * Parse an eDoc container from a buffer
  * @param edocBuffer The raw eDoc file content
- * @returns Parsed container with files and signatures
+ * @returns Parsed container with files, document file list, metadata file list, signed file list, and signatures
  */
 export function parseEdoc(edocBuffer: Uint8Array): EdocContainer {
   try {
     // Unzip the eDoc container
     const unzipped = unzipSync(edocBuffer);
 
-    // Convert to a Map for easier access
+    // Convert to Maps for easier access
     const files = new Map<string, Uint8Array>();
+    const documentFileList: string[] = [];
+    const metadataFileList: string[] = [];
+
     Object.entries(unzipped).forEach(([filename, content]) => {
       files.set(filename, content);
+
+      // Separate files into document and metadata categories
+      if (filename.startsWith("META-INF/") || filename === "mimetype") {
+        metadataFileList.push(filename);
+      } else {
+        documentFileList.push(filename);
+      }
     });
 
     // Find and parse signatures
     const signatures: SignatureInfo[] = [];
     const signatureFiles = findSignatureFiles(files);
+    const signedFileSet = new Set<string>();
 
     for (const sigFile of signatureFiles) {
       const sigContent = files.get(sigFile);
@@ -37,15 +48,28 @@ export function parseEdoc(edocBuffer: Uint8Array): EdocContainer {
           const fileSignature = parseSignatureFile(sigContent, sigFile);
           if (fileSignature) {
             signatures.push(fileSignature);
+            // Add referenced files to the set of signed files
+            if (fileSignature.references && fileSignature.references.length > 0) {
+              fileSignature.references.forEach((ref) => {
+                // Only add files that actually exist in the container
+                if (files.has(ref)) {
+                  signedFileSet.add(ref);
+                }
+              });
+            }
           }
         } catch (error) {
           console.error(`Error parsing signature ${sigFile}:`, error);
         }
       }
     }
+    const signedFileList = Array.from(signedFileSet);
 
     return {
       files,
+      documentFileList,
+      metadataFileList,
+      signedFileList,
       signatures,
     };
   } catch (error) {
