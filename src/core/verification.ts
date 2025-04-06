@@ -353,7 +353,7 @@ export async function verifySignedInfo(
     }
 
     // Determine canonicalization method
-    const c14nMethod = canonicalizationMethod || "http://www.w3.org/2001/10/xml-exc-c14n#";
+    const c14nMethod = canonicalizationMethod || CANONICALIZATION_METHODS.default;
 
     // Canonicalize the SignedInfo element
     const canonicalizer = XMLCanonicalizer.fromMethod(c14nMethod);
