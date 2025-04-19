@@ -3,6 +3,8 @@ import {
   CANONICALIZATION_METHODS,
 } from "../../../../src/core/canonicalization/XMLCanonicalizer";
 import { createXMLParser, querySelector } from "../../../../src/utils/xmlParser";
+import fs from "fs";
+import path from "path";
 
 describe("XMLCanonicalizer", () => {
   it("should correctly initialize with a method", () => {
@@ -30,6 +32,10 @@ describe("XMLCanonicalizer", () => {
   describe("canonicalization fixtures", () => {
     // Create a parser to use in all tests
     const parser = createXMLParser();
+    const C14N_SAMPLES_PATH = path.join(__dirname, "../../../fixtures/c14n_samples");
+    const read_sample = (filename: string): string => {
+      return fs.readFileSync(path.join(C14N_SAMPLES_PATH, filename), "utf8").trim();
+    };
 
     // Test fixture 1: Simple XML document
     it("should correctly canonicalize a simple XML document", () => {
@@ -122,11 +128,44 @@ describe("XMLCanonicalizer", () => {
       expect(XMLCanonicalizer.c14n(node)).toBe(expectedC14n);
     });
 
+    // Test fixture: Document with multiple namespaces to demonstrate Exclusive C14N differences
+    it("should correctly handle namespaces in exclusive canonicalization", () => {
+      const doc = parser.parseFromString(
+        `<root xmlns="http://default.example.org/" xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/">
+          <a:child xmlns:c="http://c.example.org/">
+            <b:grandchild>
+              <c:greatgrandchild>Test content</c:greatgrandchild>
+            </b:grandchild>
+          </a:child>
+        </root>
+      `,
+        "application/xml",
+      );
+
+      const childNode = querySelector(doc, "a:child") as any;
+
+      // Regular C14N includes all namespaces in scope
+      // const expectedC14n11 =
+      //   '<a:child xmlns="http://default.example.org/" xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/" xmlns:c="http://c.example.org/">\n            <b:grandchild>\n              <c:greatgrandchild>Test content</c:greatgrandchild>\n            </b:grandchild>\n          </a:child>';
+      // Regular C14N includes all namespaces in scope
+      const expectedC14n11 =
+        '<a:child xmlns="http://default.example.org/" xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/" xmlns:c="http://c.example.org/">\n<b:grandchild>\n<c:greatgrandchild>Test content</c:greatgrandchild>\n</b:grandchild>\n</a:child>';
+      // Regular C14N includes all namespaces in scope
+      const expectedC14n =
+        '<a:child xmlns="http://default.example.org/" xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/" xmlns:c="http://c.example.org/"><b:grandchild><c:greatgrandchild>Test content</c:greatgrandchild></b:grandchild></a:child>';
+      // Exclusive C14N only includes visibly used namespaces
+      const expectedExcC14n =
+        '<a:child xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/" xmlns:c="http://c.example.org/"><c:greatgrandchild>Test content</c:greatgrandchild></b:grandchild></a:child>';
+
+      expect(XMLCanonicalizer.c14n11(childNode)).toBe(expectedC14n11);
+      expect(XMLCanonicalizer.c14n(childNode)).toBe(expectedC14n);
+      //expect(XMLCanonicalizer.excC14n(childNode)).toBe(expectedExcC14n);
+    });
+
     // Test fixture 7: Real-world eDoc signature fragment
     it("should correctly canonicalize a signature fragment", () => {
       const doc = parser.parseFromString(
-        `
-        <ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
           <ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
           <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
           <ds:Reference URI="">
@@ -146,33 +185,21 @@ describe("XMLCanonicalizer", () => {
         '<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"></ds:SignatureMethod><ds:Reference URI=""><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></ds:DigestMethod><ds:DigestValue>zvMPfVai/pAG8liFbVnmOLfUGN4rBaV+X1+HE9wPIno=</ds:DigestValue></ds:Reference></ds:SignedInfo>';
       expect(XMLCanonicalizer.c14n(node)).toBe(expectedC14n);
     });
-    it("should correctly canonicalize a signature example 1", () => {
-      const doc = parser.parseFromString(
-        `<?xml version="1.0" encoding="UTF-8" standalone="no"?><asic:XAdESSignatures xmlns:asic="http://uri.etsi.org/02918/v1.2.1#"><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="S1">
-      <ds:SignedInfo Id="S1-SignedInfo">
-      <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
-      <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
-      <ds:Reference Id="S1-ref-1" URI="Sample%20File.pdf">
-      <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-      <ds:DigestValue>KEaw8zdE2ySmreG7ZkO2+Agf0tpuVK7g+bdYZKm9XMY=</ds:DigestValue>
-      </ds:Reference>
-      <ds:Reference Id="S1-ref-2" URI="Sample%20File.docx">
-      <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-      <ds:DigestValue>24JzEZGtUCnMB12jy6eQDSZedGfWUkxaCLYEF/lygEA=</ds:DigestValue>
-      </ds:Reference>
-      <ds:Reference Id="S1-ref-SignedProperties" Type="http://uri.etsi.org/01903#SignedProperties" URI="#S1-SignedProperties">
-      <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-      <ds:DigestValue>p6LJHwzFitT8DMYXEJzpkoxL6oonJQc2llg+QMu6si8=</ds:DigestValue>
-      </ds:Reference>
-      </ds:SignedInfo>
-      <ds:SignatureValue>TpS9H1nbT2TfURZW78+jDo7JhlNFNVpvIhWCGHdDTCDxO+SSJclKyxqoA/ZECew1iqTUrsnwvVni
-      lhTw6GC8kw7at+IleVYW9qJ4XSxe8moL04BfVDbMxyHniOu9e2eD</ds:SignatureValue></ds:Signature></asic:XAdESSignatures>`,
-        `text/xml`,
-      );
+    it("should correctly canonicalize a signature example 1 n11", () => {
+      const originalXml = read_sample("samplecontent1.xml");
+      const expectedC14n11 = read_sample("samplecontent1_c14n11_signedinfo.xml");
+
+      const doc = parser.parseFromString(originalXml, `text/xml`);
       const node = querySelector(doc, "ds:SignedInfo") as any;
-      const expectedC14n11 =
-        '<ds:SignedInfo xmlns:asic="http://uri.etsi.org/02918/v1.2.1#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="S1-SignedInfo">\n<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"></ds:CanonicalizationMethod>\n<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"></ds:SignatureMethod>\n<ds:Reference Id="S1-ref-1" URI="Sample%20File.pdf">\n<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></ds:DigestMethod>\n<ds:DigestValue>KEaw8zdE2ySmreG7ZkO2+Agf0tpuVK7g+bdYZKm9XMY=</ds:DigestValue>\n</ds:Reference>\n<ds:Reference Id="S1-ref-2" URI="Sample%20File.docx">\n<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></ds:DigestMethod>\n<ds:DigestValue>24JzEZGtUCnMB12jy6eQDSZedGfWUkxaCLYEF/lygEA=</ds:DigestValue>\n</ds:Reference>\n<ds:Reference Id="S1-ref-SignedProperties" Type="http://uri.etsi.org/01903#SignedProperties" URI="#S1-SignedProperties">\n<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></ds:DigestMethod>\n<ds:DigestValue>p6LJHwzFitT8DMYXEJzpkoxL6oonJQc2llg+QMu6si8=</ds:DigestValue>\n</ds:Reference>\n</ds:SignedInfo>';
       expect(XMLCanonicalizer.c14n11(node)).toBe(expectedC14n11);
+    });
+    it("should correctly canonicalize a signature example 1 exc", () => {
+      const originalXml = read_sample("samplecontent1.xml");
+      const expectedC14nexc = read_sample("samplecontent1_c14nexc_signedinfo.xml");
+
+      const doc = parser.parseFromString(originalXml, `text/xml`);
+      const node = querySelector(doc, "ds:SignedInfo") as any;
+      expect(XMLCanonicalizer.c14n_exc(node)).toBe(expectedC14nexc);
     });
   });
 });
