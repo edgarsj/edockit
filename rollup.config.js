@@ -34,7 +34,7 @@ export default [
     output: {
       file: packageJson.browser,
       format: "umd",
-      name: "edockit", // Changed from 'LatvianEdoc' to 'edockit'
+      name: "edockit",
       sourcemap: true,
       globals: {
         fflate: "fflate",

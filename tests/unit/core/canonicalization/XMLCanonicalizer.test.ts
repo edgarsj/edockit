@@ -185,6 +185,13 @@ describe("XMLCanonicalizer", () => {
         '<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"></ds:SignatureMethod><ds:Reference URI=""><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></ds:DigestMethod><ds:DigestValue>zvMPfVai/pAG8liFbVnmOLfUGN4rBaV+X1+HE9wPIno=</ds:DigestValue></ds:Reference></ds:SignedInfo>';
       expect(XMLCanonicalizer.c14n(node)).toBe(expectedC14n);
     });
+    it("should correctly retain whitespace 1 c14n", () => {
+      const originalXml = read_sample("whitespace1.xml");
+      const expectedC14n11 = read_sample("whitespace1_c14n.xml");
+
+      const doc = parser.parseFromString(originalXml, `text/xml`);
+      expect(XMLCanonicalizer.c14n11(doc.documentElement as any)).toBe(expectedC14n11);
+    });
     it("should correctly canonicalize a signature example 1 n11", () => {
       const originalXml = read_sample("samplecontent1.xml");
       const expectedC14n11 = read_sample("samplecontent1_c14n11_signedinfo.xml");
@@ -192,6 +199,14 @@ describe("XMLCanonicalizer", () => {
       const doc = parser.parseFromString(originalXml, `text/xml`);
       const node = querySelector(doc, "ds:SignedInfo") as any;
       expect(XMLCanonicalizer.c14n11(node)).toBe(expectedC14n11);
+    });
+    it("should correctly canonicalize a signature example 1 c14n", () => {
+      const originalXml = read_sample("samplecontent1.xml");
+      const expectedC14n = read_sample("samplecontent1_c14n_signedinfo.xml");
+
+      const doc = parser.parseFromString(originalXml, `text/xml`);
+      const node = querySelector(doc, "ds:SignedInfo") as any;
+      expect(XMLCanonicalizer.c14n11(node)).toBe(expectedC14n);
     });
     it("should correctly canonicalize a signature example 1 exc", () => {
       const originalXml = read_sample("samplecontent1.xml");
