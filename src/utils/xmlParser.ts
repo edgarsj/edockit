@@ -13,6 +13,7 @@ export interface XMLParserInterface {
 export function createXMLParser(): XMLParserInterface {
   // Check if we're in a browser environment with native DOM support
   if (typeof window !== "undefined" && window.DOMParser) {
+    console.log("Using native DOMParser");
     return new window.DOMParser();
   }
 
@@ -23,6 +24,7 @@ export function createXMLParser(): XMLParserInterface {
     return {
       parseFromString(text: string, mimeType: string): Document {
         const dom = new JSDOM(text, { contentType: mimeType });
+        console.log("Using jsdom");
         return dom.window.document;
       },
     };
