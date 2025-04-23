@@ -40,6 +40,11 @@ jest.mock("@peculiar/x509", () => ({
         rawData: new ArrayBuffer(0),
       };
     }
+
+    // Add missing methods for X509Certificate
+    exportAsPem() {
+      return "-----BEGIN CERTIFICATE-----\nMockCertificateBase64==\n-----END CERTIFICATE-----";
+    }
   },
 }));
 
@@ -55,6 +60,7 @@ jest.mock("../../../src/utils/xmlParser", () => ({
   createXMLParser: jest.fn(),
   querySelector: jest.fn(),
   querySelectorAll: jest.fn(),
+  serializeToXML: jest.fn().mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
 }));
 
 describe("Signature Parser", () => {
@@ -84,6 +90,22 @@ describe("Signature Parser", () => {
       DigestValue: {
         textContent: "mock-digest-value",
       },
+      Reference: {
+        getAttribute: (attr: string) => {
+          if (attr === "URI") return "test.pdf";
+          if (attr === "Type") return "";
+          return "";
+        },
+        querySelector: jest.fn().mockImplementation((selector) => {
+          if (selector.includes("DigestValue")) {
+            return { textContent: "mock-digest-value" };
+          }
+          if (selector.includes("DigestMethod")) {
+            return { getAttribute: () => "http://www.w3.org/2001/04/xmlenc#sha256" };
+          }
+          return null;
+        }),
+      },
     };
 
     // Setup mock for querySelector - no recursion
@@ -107,6 +129,15 @@ describe("Signature Parser", () => {
               if (attr === "Type") return "";
               return "";
             },
+            querySelector: (sel: string) => {
+              if (sel.includes("DigestValue")) {
+                return { textContent: "mock-digest-value" };
+              }
+              if (sel.includes("DigestMethod")) {
+                return { getAttribute: () => "http://www.w3.org/2001/04/xmlenc#sha256" };
+              }
+              return null;
+            },
           },
         ];
       }
@@ -120,12 +151,19 @@ describe("Signature Parser", () => {
     const mockSignatureElement = {
       nodeName: "ds:Signature",
       getAttribute: jest.fn().mockReturnValue("test-sig-id"),
+      // Add missing methods for element
+      ownerDocument: {
+        createNodeIterator: jest.fn(),
+        evaluate: jest.fn(),
+      },
     };
 
     const mockDocument = {
       documentElement: {
         nodeName: "root",
       },
+      createNodeIterator: jest.fn(),
+      evaluate: jest.fn(),
     };
 
     // Call the function with our mocked elements
@@ -141,6 +179,12 @@ describe("Signature Parser", () => {
     expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
     expect(result.signatureValue).toBe("MockSignatureValueBase64==");
     expect(result.algorithm).toBe("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
+    expect(result.signedInfoXml).toBe("<ds:SignedInfo>mocked xml</ds:SignedInfo>");
+    // Verify references array
+    expect(result.references).toContain("test.pdf");
+
+    // Verify signedChecksums object
+    expect(result.signedChecksums).toEqual({ "test.pdf": "mock-digest-value" });
 
     // Verify that querySelector was called with the right parameters
     expect(querySelector).toHaveBeenCalledWith(mockSignatureElement, "ds\\:SignedInfo, SignedInfo");

@@ -1,6 +1,14 @@
 // src/core/parser/signatureParser.ts
 import { X509Certificate } from "@peculiar/x509";
-import { createXMLParser, querySelector, querySelectorAll } from "../../utils/xmlParser";
+import * as XmlParserModule from "../../utils/xmlParser";
+
+import {
+  createXMLParser,
+  querySelector,
+  querySelectorAll,
+  queryByXPath,
+  serializeToXML,
+} from "../../utils/xmlParser";
 import { CANONICALIZATION_METHODS } from "../canonicalization/XMLCanonicalizer";
 import { extractSignerInfo } from "../certificate";
 import { SignatureInfo } from "./types";
@@ -84,6 +92,8 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   const signatureId = signatureElement.getAttribute("Id") || "unknown";
   // Find SignedInfo just like in browser code
   const signedInfo = querySelector(signatureElement, "ds\\:SignedInfo, SignedInfo");
+  //const signedInfo = queryByXPath(signatureElement, ".//*[local-name()='SignedInfo']");
+
   if (!signedInfo) {
     throw new Error("SignedInfo element not found");
   }
@@ -98,28 +108,41 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     canonicalizationMethod = c14nMethodEl.getAttribute("Algorithm") || canonicalizationMethod;
   }
 
+  // // Serialize the SignedInfo element to XML string
+  // let signedInfoXml = "";
+  // try {
+  //   // Use the serializeToXML utility function which handles browser/Node environments
+  //   signedInfoXml = serializeToXML(signedInfo);
+  // } catch (e) {
+  //   console.warn("Could not serialize SignedInfo element:", e);
+  // }
+
   // Serialize the SignedInfo element to XML string
   let signedInfoXml = "";
-  try {
-    // Try to use XMLSerializer if available
-    if (typeof XMLSerializer !== "undefined") {
-      signedInfoXml = new XMLSerializer().serializeToString(signedInfo);
-    } else if (typeof window !== "undefined" && window.XMLSerializer) {
-      signedInfoXml = new window.XMLSerializer().serializeToString(signedInfo);
-    } else {
-      // Fallback for Node.js environment
-      try {
-        const { JSDOM } = require("jsdom");
-        const dom = new JSDOM();
-        const serializer = new dom.window.XMLSerializer();
-        signedInfoXml = serializer.serializeToString(signedInfo);
-      } catch (e) {
-        console.warn("Could not serialize SignedInfo:", e);
-      }
-    }
-  } catch (e) {
-    console.warn("Could not serialize SignedInfo element:", e);
-  }
+  signedInfoXml = XmlParserModule.serializeToXML(signedInfo);
+
+  // try {
+  //   // First check if signedInfo is a valid node
+  //   if (!signedInfo) {
+  //     console.warn("SignedInfo element is undefined or null");
+  //     signedInfoXml = "";
+  //   } else if (signedInfo.nodeType === undefined) {
+  //     console.warn("SignedInfo doesn't appear to be a valid XML node:", signedInfo);
+  //     signedInfoXml = "";
+  //   } else {
+  //     // Try to use XMLSerializer if available in browser
+  //     if (typeof window !== "undefined" && window.XMLSerializer) {
+  //       signedInfoXml = new window.XMLSerializer().serializeToString(signedInfo);
+  //     } else {
+  //       // Node.js environment - use xmldom only
+  //       const xmldom = require("@xmldom/xmldom");
+  //       const serializer = new xmldom.XMLSerializer();
+  //       signedInfoXml = serializer.serializeToString(signedInfo);
+  //     }
+  //   }
+  // } catch (e) {
+  //   console.warn("Could not serialize SignedInfo element:", e);
+  // }
 
   // Get signature method
   const signatureMethod = querySelector(signedInfo, "ds\\:SignatureMethod, SignatureMethod");

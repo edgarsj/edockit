@@ -1,7 +1,7 @@
 import { X509Certificate } from "@peculiar/x509";
 // Import crypto dynamically only when needed in Node environment
 import { checkCertificateValidity, CertificateInfo, parseCertificate } from "./certificate";
-import { createXMLParser } from "../utils/xmlParser";
+import { createXMLParser, querySelector } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
 
@@ -341,9 +341,7 @@ export async function verifySignedInfo(
     // Parse the SignedInfo XML
     const parser = createXMLParser();
     const xmlDoc = parser.parseFromString(signatureXml, "application/xml");
-    const signedInfo =
-      xmlDoc.getElementsByTagName("SignedInfo")[0] ||
-      xmlDoc.getElementsByTagName("ds:SignedInfo")[0];
+    const signedInfo = querySelector(xmlDoc, "ds:SignedInfo") as any;
 
     if (!signedInfo) {
       return {
@@ -356,8 +354,7 @@ export async function verifySignedInfo(
     const c14nMethod = canonicalizationMethod || CANONICALIZATION_METHODS.default;
 
     // Canonicalize the SignedInfo element
-    const canonicalizer = XMLCanonicalizer.fromMethod(c14nMethod);
-    const canonicalizedSignedInfo = canonicalizer.canonicalize(signedInfo as any);
+    const canonicalizedSignedInfo = XMLCanonicalizer.canonicalize(signedInfo, c14nMethod);
 
     // Clean up signature value (remove whitespace)
     const cleanSignatureValue = signatureValue.replace(/\s+/g, "");

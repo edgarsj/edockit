@@ -40,7 +40,8 @@
   "dependencies": {
     "@peculiar/x509": "^1.12.3",
     "@xmldom/xmldom": "^0.9.8",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "xpath": "^0.0.34"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",
