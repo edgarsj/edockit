@@ -57,6 +57,20 @@ describe("XMLCanonicalizer", () => {
       expect(c14n10).toBe(c14n11); // Both should be identical
       expect(c14n10).toBe("<doc>Text <b>bold</b> and <i>italic</i></doc>");
     });
+    it("handles multiple nested levels", () => {
+      const xml = `<doc><section><title>Header</title><content><p>Text</p></content></section></doc>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+      const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(result).toBe(
+        "<doc>\n<section>\n<title>Header</title>\n<content>\n<p>Text</p>\n</content>\n</section>\n</doc>",
+      );
+    });
+    it("does not add extra newlines for text-only content", () => {
+      const xml = `<div>Hello World</div>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+      const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(result).toBe("<div>Hello World</div>");
+    });
     // // Test fixture 1: Simple XML document
     // it("should correctly canonicalize a simple XML document", () => {
     //   const doc = parser.parseFromString(
@@ -178,6 +192,7 @@ describe("XMLCanonicalizer", () => {
       const doc = parser.parseFromString(originalXml, `text/xml`);
       expect(XMLCanonicalizer.c14n11(doc.documentElement as any)).toBe(expectedC14n11);
     });
+
     it("should correctly canonicalize a signature example 1 n11", () => {
       const originalXml = read_sample("samplecontent1.xml");
       const expectedC14n11 = read_sample("samplecontent1_c14n11_signedinfo.xml");
@@ -186,6 +201,7 @@ describe("XMLCanonicalizer", () => {
       const node = querySelector(doc, "ds:SignedInfo") as any;
       expect(XMLCanonicalizer.c14n11(node)).toBe(expectedC14n11);
     });
+
     it("should correctly canonicalize a signature example 1 c14n", () => {
       const originalXml = read_sample("samplecontent1.xml");
       const expectedC14n = read_sample("samplecontent1_c14n_signedinfo.xml");

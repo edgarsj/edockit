@@ -1,8 +1,12 @@
 // Define types for canonicalization methods
 interface CanonMethod {
-  beforeChildren: (hasElementChildren?: boolean) => string;
-  afterChildren: (hasElementChildren?: boolean) => string;
-  betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => string;
+  beforeChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
+  afterChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
+  betweenChildren: (
+    prevIsElement?: boolean,
+    nextIsElement?: boolean,
+    hasMixedContent?: boolean,
+  ) => string;
   afterElement: () => string;
   isCanonicalizationMethod?: string; // ID of canonicalization method for specific handling
 }
@@ -25,9 +29,23 @@ const methods: Record<string, CanonMethod> = {
     isCanonicalizationMethod: "c14n",
   },
   c14n11: {
-    beforeChildren: (hasElementChildren?: boolean) => (hasElementChildren ? "\n" : ""),
-    afterChildren: (hasElementChildren?: boolean) => (hasElementChildren ? "\n" : ""),
-    betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => {
+    beforeChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => {
+      // If it's mixed content, don't add newlines
+      if (hasMixedContent) return "";
+      return hasElementChildren ? "\n" : "";
+    },
+    afterChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => {
+      // If it's mixed content, don't add newlines
+      if (hasMixedContent) return "";
+      return hasElementChildren ? "\n" : "";
+    },
+    betweenChildren: (
+      prevIsElement?: boolean,
+      nextIsElement?: boolean,
+      hasMixedContent?: boolean,
+    ) => {
+      // If it's mixed content, don't add newlines between elements
+      if (hasMixedContent) return "";
       // Only add newline between elements
       return prevIsElement && nextIsElement ? "\n" : "";
     },
@@ -188,7 +206,26 @@ class XMLCanonicalizer {
         let hasElementContent = false;
         let hasLinebreaks = false;
 
-        // Analyze children
+        // First, check if there's any non-whitespace text content
+        for (const child of children) {
+          if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+            const text = child.nodeValue || "";
+            if (text.trim().length > 0) {
+              hasTextContent = true;
+              break;
+            }
+          }
+        }
+
+        // Second, check if there are any element children
+        for (const child of children) {
+          if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
+            hasElementContent = true;
+            break;
+          }
+        }
+
+        // Now process all children and analyze recursively
         for (let i = 0; i < children.length; i++) {
           const child = children[i];
 
@@ -198,24 +235,17 @@ class XMLCanonicalizer {
             // Store original text
             (child as NodeWithWhitespace)._originalText = text;
 
-            // Check for non-whitespace text content
-            if (text.trim().length > 0) {
-              hasTextContent = true;
-            }
-
             // Check for linebreaks in text
             if (text.includes("\n")) {
               hasLinebreaks = true;
             }
           } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
-            hasElementContent = true;
-
             // Recursively analyze child elements
             analyzeNode(child as NodeWithWhitespace);
           }
         }
 
-        // Set mixed content flag
+        // Set mixed content flag - true if there's both text content and element children
         node._whitespace.hasMixedContent = hasTextContent && hasElementContent;
         node._whitespace.hasExistingLinebreaks = hasLinebreaks;
       }
@@ -316,6 +346,7 @@ class XMLCanonicalizer {
       const children = Array.from(node.childNodes);
       let hasElementChildren = false;
       let lastWasElement = false;
+      const hasMixedContent = node._whitespace?.hasMixedContent || false;
 
       // First pass to determine if we have element children
       for (const child of children) {
@@ -326,14 +357,16 @@ class XMLCanonicalizer {
       }
 
       // Check if we need to add a newline for c14n11
+      // Don't add newlines for mixed content
       const needsInitialNewline =
         this.method.isCanonicalizationMethod === "c14n11" &&
         hasElementChildren &&
-        !node._whitespace?.hasExistingLinebreaks;
+        !node._whitespace?.hasExistingLinebreaks &&
+        !hasMixedContent;
 
       // Add newline for c14n11 if needed
       if (needsInitialNewline) {
-        result += "\n";
+        result += this.method.beforeChildren(hasElementChildren, hasMixedContent);
       }
 
       // Process each child
@@ -362,12 +395,14 @@ class XMLCanonicalizer {
         // Handle element node
         if (isElement) {
           // Add newline between elements if needed for c14n11
+          // Don't add newlines for mixed content
           if (
             lastWasElement &&
             this.method.isCanonicalizationMethod === "c14n11" &&
-            !node._whitespace?.hasExistingLinebreaks
+            !node._whitespace?.hasExistingLinebreaks &&
+            !hasMixedContent
           ) {
-            result += "\n";
+            result += this.method.betweenChildren(true, true, hasMixedContent);
           }
 
           // Recursively canonicalize the child element
@@ -380,8 +415,9 @@ class XMLCanonicalizer {
       }
 
       // Add final newline for c14n11 if needed
+      // Don't add newlines for mixed content
       if (needsInitialNewline) {
-        result += "\n";
+        result += this.method.afterChildren(hasElementChildren, hasMixedContent);
       }
 
       result += "</" + qName + ">";

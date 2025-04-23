@@ -64,6 +64,21 @@ describe("XMLCanonicalizer", () => {
       expect(c14n10).to.equal(c14n11); // Both should be identical
       expect(c14n10).to.equal("<doc>Text <b>bold</b> and <i>italic</i></doc>");
     });
+
+    it("handles multiple nested levels", () => {
+      const xml = `<doc><section><title>Header</title><content><p>Text</p></content></section></doc>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+      const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(result).to.equal(
+        "<doc>\n<section>\n<title>Header</title>\n<content>\n<p>Text</p>\n</content>\n</section>\n</doc>",
+      );
+    });
+    it("does not add extra newlines for text-only content", () => {
+      const xml = `<div>Hello World</div>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+      const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(result).to.equal("<div>Hello World</div>");
+    });
     // // Test fixture 1: Simple XML document
     // it("should correctly canonicalize a simple XML document", () => {
     //   const doc = parser.parseFromString(
@@ -126,8 +141,6 @@ describe("XMLCanonicalizer", () => {
       const originalXml = await fetchSample("testcontent1.xml");
       const expectedC14n11 = await fetchSample("testcontent1_c14n11.xml");
       const doc = parser.parseFromString(originalXml, `text/xml`) as any;
-      let c14n11_str = XMLCanonicalizer.c14n11(doc.documentElement);
-      console.log("C14N11 str:", c14n11_str);
       expect(XMLCanonicalizer.c14n11(doc.documentElement)).to.equal(expectedC14n11);
     });
 
@@ -179,12 +192,6 @@ describe("XMLCanonicalizer", () => {
       const originalXml = await fetchSample("whitespace1.xml");
       const expectedC14n = await fetchSample("whitespace1_c14n.xml");
 
-      // Skip the test if samples couldn't be loaded
-      if (!originalXml || !expectedC14n) {
-        this.skip();
-        return;
-      }
-
       const doc = parser.parseFromString(originalXml, `text/xml`);
       expect(XMLCanonicalizer.c14n(doc.documentElement as any)).to.equal(expectedC14n);
     });
@@ -192,12 +199,6 @@ describe("XMLCanonicalizer", () => {
     it("should correctly canonicalize a signature example 1 n11", async function () {
       const originalXml = await fetchSample("samplecontent1.xml");
       const expectedC14n11 = await fetchSample("samplecontent1_c14n11_signedinfo.xml");
-
-      // Skip the test if samples couldn't be loaded
-      if (!originalXml || !expectedC14n11) {
-        this.skip();
-        return;
-      }
 
       const doc = parser.parseFromString(originalXml, `text/xml`);
       const node = querySelector(doc, "ds:SignedInfo") as any;
@@ -207,12 +208,6 @@ describe("XMLCanonicalizer", () => {
     it("should correctly canonicalize a signature example 1 c14n", async function () {
       const originalXml = await fetchSample("samplecontent1.xml");
       const expectedC14n = await fetchSample("samplecontent1_c14n_signedinfo.xml");
-
-      // Skip the test if samples couldn't be loaded
-      if (!originalXml || !expectedC14n) {
-        this.skip();
-        return;
-      }
 
       const doc = parser.parseFromString(originalXml, `text/xml`);
       const node = querySelector(doc, "ds:SignedInfo") as any;
