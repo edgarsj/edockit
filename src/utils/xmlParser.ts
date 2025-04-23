@@ -17,20 +17,15 @@ export function createXMLParser(): XMLParserInterface {
     return new window.DOMParser();
   }
 
-  // We're in Node.js, so use jsdom
+  // We're in Node.js, so use xmldom
   try {
     // Import dynamically to avoid bundling issues
-    const { JSDOM } = require("jsdom");
-    return {
-      parseFromString(text: string, mimeType: string): Document {
-        const dom = new JSDOM(text, { contentType: mimeType });
-        console.log("Using jsdom");
-        return dom.window.document;
-      },
-    };
+    const { DOMParser } = require("@xmldom/xmldom");
+    console.log("Using xmldom");
+    return new DOMParser();
   } catch (e) {
     throw new Error(
-      "XML DOM parser not available. In Node.js environments, please install jsdom package.",
+      "XML DOM parser not available. In Node.js environments, please install @xmldom/xmldom package.",
     );
   }
 }
@@ -160,15 +155,13 @@ export function serializeToXML(node: Node): string {
     return new window.XMLSerializer().serializeToString(node);
   }
 
-  // If we're using jsdom
+  // If we're using xmldom
   try {
-    const { JSDOM } = require("jsdom");
-    const { document } = new JSDOM().window;
-    const serializer = new document.defaultView.XMLSerializer();
-    return serializer.serializeToString(node);
+    const { XMLSerializer } = require("@xmldom/xmldom");
+    return new XMLSerializer().serializeToString(node);
   } catch (e) {
     throw new Error(
-      "XML Serializer not available. In Node.js environments, please install jsdom package.",
+      "XML Serializer not available. In Node.js environments, please install @xmldom/xmldom package.",
     );
   }
 }

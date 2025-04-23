@@ -216,48 +216,32 @@ class XMLCanonicalizer {
 
       // Process children
       const children = Array.from(node.childNodes);
-      const hasElementChildren = children.some(
-        (child) => child.nodeType === NODE_TYPES.ELEMENT_NODE,
-      );
-
-      // Add formatting based on method
-      result += this.method.beforeChildren(hasElementChildren);
-
-      let lastElementChild: Node | null = null;
 
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
 
         if (child.nodeType === NODE_TYPES.TEXT_NODE) {
-          if (XMLCanonicalizer.isBase64Element(node)) {
-            result += (child.nodeValue || "").replace(/\r/g, "&#xD;");
+          const isInBase64Element = XMLCanonicalizer.isBase64Element(node);
+          const text = child.nodeValue || "";
+
+          if (isInBase64Element) {
+            // For base64 elements, replace carriage returns but keep everything else
+            result += text.replace(/\r/g, "&#xD;");
           } else {
-            const text = (child.nodeValue || "").trim();
-            if (text) {
-              result += XMLCanonicalizer.escapeXml(text);
-            }
+            // For regular elements, preserve whitespace but encode special characters
+            result += XMLCanonicalizer.escapeXml(text);
           }
         } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
-          if (lastElementChild !== null) {
-            result += this.method.betweenChildren(true, true);
-          }
           result += this.canonicalize(child, visibleNamespaces, {
             isStartingNode: false,
           });
-          lastElementChild = child;
         }
       }
 
-      result += this.method.afterChildren(hasElementChildren);
       result += "</" + qName + ">";
-
-      // Add any final element formatting
-      result += this.method.afterElement();
     } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
-      const text = (node.nodeValue || "").trim();
-      if (text) {
-        result += XMLCanonicalizer.escapeXml(text);
-      }
+      const text = node.nodeValue || "";
+      result += XMLCanonicalizer.escapeXml(text);
     }
 
     return result;

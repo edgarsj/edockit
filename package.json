@@ -39,8 +39,8 @@
   "description": "A JavaScript library for listing, parsing, and verifying the contents and signatures of electronic documents (eDoc) and Associated Signature Containers (ASiC-E), supporting EU eIDAS standards for digital signatures and electronic seals.",
   "dependencies": {
     "@peculiar/x509": "^1.12.3",
-    "fflate": "^0.8.2",
-    "jsdom": "^22.1.0"
+    "@xmldom/xmldom": "^0.9.8",
+    "fflate": "^0.8.2"
   },
   "devDependencies": {
     "@esm-bundle/chai": "^4.3.4-fix.0",

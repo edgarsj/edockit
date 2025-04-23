@@ -1,0 +1,7 @@
+<root xmlns="http://default.example.org/" xmlns:a="http://a.example.org/" xmlns:b="http://b.example.org/">
+    <a:child xmlns:c="http://c.example.org/">
+    <b:grandchild>
+        <c:greatgrandchild>Test content</c:greatgrandchild>
+    </b:grandchild>
+    </a:child>
+</root>
