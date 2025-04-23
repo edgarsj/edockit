@@ -210,13 +210,13 @@ describe("XMLCanonicalizer", () => {
       const node = querySelector(doc, "ds:SignedInfo") as any;
       expect(XMLCanonicalizer.c14n11(node)).toBe(expectedC14n);
     });
-    // it("should correctly canonicalize a signature example 1 exc", () => {
-    //   const originalXml = read_sample("samplecontent1.xml");
-    //   const expectedC14nexc = read_sample("samplecontent1_c14nexc_signedinfo.xml");
+    it("should correctly canonicalize a signature example 1 exc", () => {
+      const originalXml = read_sample("samplecontent1.xml");
+      const expectedC14nexc = read_sample("samplecontent1_c14nexc_signedinfo.xml");
 
-    //   const doc = parser.parseFromString(originalXml, `text/xml`);
-    //   const node = querySelector(doc, "ds:SignedInfo") as any;
-    //   expect(XMLCanonicalizer.c14n_exc(node)).toBe(expectedC14nexc);
-    // });
+      const doc = parser.parseFromString(originalXml, `text/xml`);
+      const node = querySelector(doc, "ds:SignedInfo") as any;
+      expect(XMLCanonicalizer.c14n_exc(node)).toBe(expectedC14nexc);
+    });
   });
 });
