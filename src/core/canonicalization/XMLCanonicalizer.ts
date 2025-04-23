@@ -4,6 +4,7 @@ interface CanonMethod {
   afterChildren: (hasElementChildren?: boolean) => string;
   betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => string;
   afterElement: () => string;
+  isCanonicalizationMethod?: string; // ID of canonicalization method for specific handling
 }
 
 // Canonicalization method URIs
@@ -17,32 +18,21 @@ const CANONICALIZATION_METHODS = {
 // Internal method implementations
 const methods: Record<string, CanonMethod> = {
   c14n: {
-    beforeChildren: () => {
-      return "";
-    },
-    afterChildren: () => {
-      return "";
-    },
-    betweenChildren: () => {
-      return "";
-    },
-    afterElement: () => {
-      return "";
-    },
+    beforeChildren: () => "",
+    afterChildren: () => "",
+    betweenChildren: () => "",
+    afterElement: () => "",
+    isCanonicalizationMethod: "c14n",
   },
   c14n11: {
-    beforeChildren: (hasElementChildren?: boolean) => {
-      return hasElementChildren ? "\n" : "";
-    },
-    afterChildren: (hasElementChildren?: boolean) => {
-      return hasElementChildren ? "\n" : "";
-    },
+    beforeChildren: (hasElementChildren?: boolean) => (hasElementChildren ? "\n" : ""),
+    afterChildren: (hasElementChildren?: boolean) => (hasElementChildren ? "\n" : ""),
     betweenChildren: (prevIsElement?: boolean, nextIsElement?: boolean) => {
+      // Only add newline between elements
       return prevIsElement && nextIsElement ? "\n" : "";
     },
-    afterElement: () => {
-      return "";
-    },
+    afterElement: () => "",
+    isCanonicalizationMethod: "c14n11",
   },
   c14n_exc: {
     // Placeholder for exclusive canonicalization - to be implemented
@@ -58,6 +48,7 @@ const methods: Record<string, CanonMethod> = {
     afterElement: () => {
       return "";
     },
+    isCanonicalizationMethod: "c14n_exc",
   },
 };
 
@@ -95,6 +86,19 @@ const NODE_TYPES = {
   ELEMENT_NODE: 1,
   TEXT_NODE: 3,
 };
+
+// Whitespace information to track
+interface WhitespaceInfo {
+  hasMixedContent?: boolean; // Whether element has both elements and text
+  hasExistingLinebreaks?: boolean; // Whether element already has linebreaks
+  originalContent?: Record<string, any>; // Original content and whitespace info
+}
+
+// Extend the Node interface to include whitespace information
+interface NodeWithWhitespace extends Node {
+  _whitespace?: WhitespaceInfo;
+  _originalText?: string; // To store original text content
+}
 
 class XMLCanonicalizer {
   private method: CanonMethod;
@@ -164,8 +168,64 @@ class XMLCanonicalizer {
     );
   }
 
+  // Method to analyze whitespace in document
+  static analyzeWhitespace(node: Node): void {
+    // If node is a document, use the document element
+    const rootNode =
+      node.nodeType === NODE_TYPES.ELEMENT_NODE ? node : (node as Document).documentElement;
+
+    function analyzeNode(node: NodeWithWhitespace): void {
+      if (node.nodeType === NODE_TYPES.ELEMENT_NODE) {
+        // Initialize whitespace info
+        node._whitespace = {
+          hasMixedContent: false,
+          hasExistingLinebreaks: false,
+          originalContent: {},
+        };
+
+        const children = Array.from(node.childNodes);
+        let hasTextContent = false;
+        let hasElementContent = false;
+        let hasLinebreaks = false;
+
+        // Analyze children
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+
+          if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+            const text = child.nodeValue || "";
+
+            // Store original text
+            (child as NodeWithWhitespace)._originalText = text;
+
+            // Check for non-whitespace text content
+            if (text.trim().length > 0) {
+              hasTextContent = true;
+            }
+
+            // Check for linebreaks in text
+            if (text.includes("\n")) {
+              hasLinebreaks = true;
+            }
+          } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
+            hasElementContent = true;
+
+            // Recursively analyze child elements
+            analyzeNode(child as NodeWithWhitespace);
+          }
+        }
+
+        // Set mixed content flag
+        node._whitespace.hasMixedContent = hasTextContent && hasElementContent;
+        node._whitespace.hasExistingLinebreaks = hasLinebreaks;
+      }
+    }
+
+    analyzeNode(rootNode as NodeWithWhitespace);
+  }
+
   canonicalize(
-    node: Node,
+    node: NodeWithWhitespace,
     visibleNamespaces = new Map<string, string>(),
     options = { isStartingNode: true },
   ): string {
@@ -189,18 +249,19 @@ class XMLCanonicalizer {
         });
       }
 
+      // Prepare the element's start tag
       const prefix = node.prefix || "";
       const localName = node.localName || node.nodeName.split(":").pop() || "";
       const qName = prefix ? `${prefix}:${localName}` : localName;
 
       result += "<" + qName;
 
-      // For the starting node, we need to include all in-scope namespaces
+      // Handle namespaces based on whether it's the starting node
       if (options.isStartingNode) {
         // Collect all namespaces in scope for this element
         const allNamespaces = XMLCanonicalizer.collectNamespaces(node);
 
-        // Include all namespaces that are in scope
+        // Include all namespaces that are in scope, sorted appropriately
         const nsEntries = Array.from(allNamespaces.entries()).sort((a, b) => {
           if (a[0] === "") return -1;
           if (b[0] === "") return 1;
@@ -215,7 +276,7 @@ class XMLCanonicalizer {
           }
         }
       } else {
-        // For non-starting nodes, only include namespaces that are newly declared
+        // For non-starting nodes, only include newly declared namespaces
         const nsEntries = Array.from(elementVisibleNamespaces.entries())
           .filter(([p, uri]) => {
             // Include if:
@@ -238,7 +299,7 @@ class XMLCanonicalizer {
         }
       }
 
-      // Handle attributes
+      // Handle attributes (sorted lexicographically)
       if (node.attributes) {
         const attrs = Array.from(node.attributes)
           .filter((attr) => !attr.name.startsWith("xmlns"))
@@ -253,48 +314,130 @@ class XMLCanonicalizer {
 
       // Process children
       const children = Array.from(node.childNodes);
+      let hasElementChildren = false;
+      let lastWasElement = false;
 
+      // First pass to determine if we have element children
+      for (const child of children) {
+        if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
+          hasElementChildren = true;
+          break;
+        }
+      }
+
+      // Check if we need to add a newline for c14n11
+      const needsInitialNewline =
+        this.method.isCanonicalizationMethod === "c14n11" &&
+        hasElementChildren &&
+        !node._whitespace?.hasExistingLinebreaks;
+
+      // Add newline for c14n11 if needed
+      if (needsInitialNewline) {
+        result += "\n";
+      }
+
+      // Process each child
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        const isElement = child.nodeType === NODE_TYPES.ELEMENT_NODE;
+        const nextChild = i < children.length - 1 ? children[i + 1] : null;
+        const nextIsElement = nextChild && nextChild.nodeType === NODE_TYPES.ELEMENT_NODE;
 
+        // Handle text node
         if (child.nodeType === NODE_TYPES.TEXT_NODE) {
-          const isInBase64Element = XMLCanonicalizer.isBase64Element(node);
           const text = child.nodeValue || "";
 
-          if (isInBase64Element) {
+          if (XMLCanonicalizer.isBase64Element(node)) {
+            // Special handling for base64 content
             result += text.replace(/\r/g, "&#xD;");
           } else {
-            result += XMLCanonicalizer.escapeXml(text);
+            // Use the original text exactly as it was
+            result += (child as NodeWithWhitespace)._originalText || text;
           }
-        } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
-          result += this.canonicalize(child, elementVisibleNamespaces, {
+
+          lastWasElement = false;
+          continue;
+        }
+
+        // Handle element node
+        if (isElement) {
+          // Add newline between elements if needed for c14n11
+          if (
+            lastWasElement &&
+            this.method.isCanonicalizationMethod === "c14n11" &&
+            !node._whitespace?.hasExistingLinebreaks
+          ) {
+            result += "\n";
+          }
+
+          // Recursively canonicalize the child element
+          result += this.canonicalize(child as NodeWithWhitespace, elementVisibleNamespaces, {
             isStartingNode: false,
           });
+
+          lastWasElement = true;
         }
+      }
+
+      // Add final newline for c14n11 if needed
+      if (needsInitialNewline) {
+        result += "\n";
       }
 
       result += "</" + qName + ">";
     } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
-      const text = node.nodeValue || "";
+      // For standalone text nodes
+      const text = (node as NodeWithWhitespace)._originalText || node.nodeValue || "";
       result += XMLCanonicalizer.escapeXml(text);
     }
 
     return result;
   }
 
+  // Modified static methods that incorporate whitespace analysis
   static c14n(node: Node): string {
+    // First analyze document whitespace
+    this.analyzeWhitespace(node);
+
+    // Then create canonicalizer and process the node
     const canonicalizer = new XMLCanonicalizer(methods.c14n);
-    return canonicalizer.canonicalize(node);
+    return canonicalizer.canonicalize(node as NodeWithWhitespace);
   }
 
   static c14n11(node: Node): string {
+    // First analyze document whitespace
+    this.analyzeWhitespace(node);
+
+    // Then create canonicalizer and process the node
     const canonicalizer = new XMLCanonicalizer(methods.c14n11);
-    return canonicalizer.canonicalize(node);
+    return canonicalizer.canonicalize(node as NodeWithWhitespace);
   }
 
   static c14n_exc(node: Node): string {
+    // First analyze document whitespace
+    this.analyzeWhitespace(node);
+
     // Placeholder for exclusive canonicalization
     throw new Error("Exclusive canonicalization not yet implemented");
+  }
+
+  // New method that takes URI directly
+  static canonicalize(node: Node, methodUri: string): string {
+    // Get the method from the URI
+    const methodKey =
+      CANONICALIZATION_METHODS[methodUri as keyof typeof CANONICALIZATION_METHODS] ||
+      CANONICALIZATION_METHODS.default;
+
+    switch (methodKey) {
+      case "c14n":
+        return this.c14n(node);
+      case "c14n11":
+        return this.c14n11(node);
+      case "c14n_exc":
+        return this.c14n_exc(node);
+      default:
+        throw new Error(`Unsupported canonicalization method: ${methodUri}`);
+    }
   }
 }
 

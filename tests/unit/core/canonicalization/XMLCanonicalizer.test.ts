@@ -37,6 +37,26 @@ describe("XMLCanonicalizer", () => {
       return fs.readFileSync(path.join(C14N_SAMPLES_PATH, filename), "utf8");
     };
 
+    it("C14N 1.0 vs 1.1 whitespace handling", () => {
+      const xml = `<root><a><b>text</b></a></root>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+
+      const c14n10 = XMLCanonicalizer.c14n(doc.documentElement as any);
+      expect(c14n10).toBe("<root><a><b>text</b></a></root>");
+
+      const c14n11 = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(c14n11).toBe("<root>\n<a>\n<b>text</b>\n</a>\n</root>");
+    });
+    it("Mixed content remains unchanged", () => {
+      const xml = `<doc>Text <b>bold</b> and <i>italic</i></doc>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+
+      const c14n10 = XMLCanonicalizer.c14n(doc.documentElement as any);
+      const c14n11 = XMLCanonicalizer.c14n11(doc.documentElement as any);
+
+      expect(c14n10).toBe(c14n11); // Both should be identical
+      expect(c14n10).toBe("<doc>Text <b>bold</b> and <i>italic</i></doc>");
+    });
     // // Test fixture 1: Simple XML document
     // it("should correctly canonicalize a simple XML document", () => {
     //   const doc = parser.parseFromString(
