@@ -174,8 +174,19 @@ class XMLCanonicalizer {
     let result = "";
 
     if (node.nodeType === NODE_TYPES.ELEMENT_NODE) {
-      if (options.isStartingNode && !visibleNamespaces.size) {
-        visibleNamespaces = XMLCanonicalizer.collectNamespaces(node);
+      // Create a new map for this element's visible namespaces
+      const elementVisibleNamespaces = new Map(visibleNamespaces);
+
+      // Collect namespaces declared on this element
+      if (node.attributes) {
+        Array.from(node.attributes).forEach((attr) => {
+          if (attr.name === "xmlns") {
+            elementVisibleNamespaces.set("", attr.value);
+          } else if (attr.name.startsWith("xmlns:")) {
+            const prefix = attr.name.substring(6);
+            elementVisibleNamespaces.set(prefix, attr.value);
+          }
+        });
       }
 
       const prefix = node.prefix || "";
@@ -184,13 +195,39 @@ class XMLCanonicalizer {
 
       result += "<" + qName;
 
-      // Handle namespaces for root element
+      // For the starting node, we need to include all in-scope namespaces
       if (options.isStartingNode) {
-        const nsEntries = Array.from(visibleNamespaces.entries()).sort((a, b) => {
+        // Collect all namespaces in scope for this element
+        const allNamespaces = XMLCanonicalizer.collectNamespaces(node);
+
+        // Include all namespaces that are in scope
+        const nsEntries = Array.from(allNamespaces.entries()).sort((a, b) => {
           if (a[0] === "") return -1;
           if (b[0] === "") return 1;
           return a[0].localeCompare(b[0]);
         });
+
+        for (const [prefix, uri] of nsEntries) {
+          if (prefix === "") {
+            result += ` xmlns="${uri}"`;
+          } else {
+            result += ` xmlns:${prefix}="${uri}"`;
+          }
+        }
+      } else {
+        // For non-starting nodes, only include namespaces that are newly declared
+        const nsEntries = Array.from(elementVisibleNamespaces.entries())
+          .filter(([p, uri]) => {
+            // Include if:
+            // 1. It's not in the parent's visible namespaces, or
+            // 2. The URI is different from parent's
+            return !visibleNamespaces.has(p) || visibleNamespaces.get(p) !== uri;
+          })
+          .sort((a, b) => {
+            if (a[0] === "") return -1;
+            if (b[0] === "") return 1;
+            return a[0].localeCompare(b[0]);
+          });
 
         for (const [prefix, uri] of nsEntries) {
           if (prefix === "") {
@@ -225,14 +262,12 @@ class XMLCanonicalizer {
           const text = child.nodeValue || "";
 
           if (isInBase64Element) {
-            // For base64 elements, replace carriage returns but keep everything else
             result += text.replace(/\r/g, "&#xD;");
           } else {
-            // For regular elements, preserve whitespace but encode special characters
             result += XMLCanonicalizer.escapeXml(text);
           }
         } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
-          result += this.canonicalize(child, visibleNamespaces, {
+          result += this.canonicalize(child, elementVisibleNamespaces, {
             isStartingNode: false,
           });
         }
