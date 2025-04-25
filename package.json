@@ -66,5 +66,13 @@
     "dist",
     "LICENSE",
     "README.md"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edgarsj/edockit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/edgarsj/edockit/issues"
+  },
+  "homepage": "https://github.com/edgarsj/edockit#readme"
 }
