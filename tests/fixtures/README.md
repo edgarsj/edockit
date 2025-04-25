@@ -12,6 +12,15 @@ For integration tests to pass, place the following files in the sensitive direct
 
 - `Sample File.edoc` - A sample eDoc file containing signed documents
 
+### Why eDoc Files Often Contain Sensitive Data
+
+Latvian eDoc files typically contain identifying information about the signers:
+- Each eDoc usually contains the signer's full name and personal identification number
+- These personal identifiers cannot be stored in Git without that person's consent
+- Documents signed with company certificates rather than personal certificates are welcome for testing purposes
+
+This is why the `/tests/fixtures/sensitive/` directory was created - to allow testing with real eDoc files without exposing personal information in the repository.
+
 ### Obtaining Test Fixtures
 
 If you need access to the test fixtures:
@@ -32,6 +41,27 @@ Files in this main fixtures directory (/tests/fixtures/) are committed to the re
 - Real names or addresses
 - Any information that could identify a real person
 
+## File Lists for Browser Tests
+
+Browser tests use `filelist.json` files to discover test files since browser environments can't access the filesystem directly. These JSON files are simple arrays listing the filenames in each directory:
+
+```json
+[
+  "example1.edoc",
+  "example2.asice",
+  "example3.edoc"
+]
+```
+
+### Maintaining File Lists
+
+When adding or removing test files, remember to update the corresponding `filelist.json`:
+
+1. `/tests/fixtures/sensitive/valid_samples/filelist.json` - For sensitive valid samples
+2. `/tests/fixtures/valid_samples/filelist.json` - For public valid samples
+
+This approach allows browser tests to discover files without hardcoding sensitive filenames in test code.
+
 ## Creating New Test Fixtures
 
 When creating new test fixtures:
@@ -40,6 +70,7 @@ When creating new test fixtures:
 2. If real data must be used, sanitize all personally identifiable information
 3. Place files with sensitive data only in the `/tests/fixtures/sensitive/` directory
 4. Document any special requirements for new test fixtures in this README
+5. Update the corresponding `filelist.json` file
 
 ## Modifying Tests
 
