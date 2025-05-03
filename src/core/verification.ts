@@ -4,6 +4,7 @@ import { checkCertificateValidity, CertificateInfo, parseCertificate } from "./c
 import { createXMLParser, querySelector } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
+import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 
 /**
  * Options for verification process
@@ -37,6 +38,13 @@ export interface ChecksumVerificationResult {
 export interface SignatureVerificationResult {
   isValid: boolean;
   reason?: string;
+  errorDetails?: {
+    category: string;
+    originalMessage: string;
+    algorithm: any;
+    environment: string;
+    keyLength: number;
+  };
 }
 
 /**
@@ -375,11 +383,50 @@ export async function verifySignedInfo(
     let publicKey;
     try {
       const subtle = getCryptoSubtle();
+      if (isBrowser() && algorithm.name === "RSASSA-PKCS1-v1_5") {
+        // console.log("Browser environment detected, applying RSA key fix");
+        publicKeyData = fixRSAModulusPadding(publicKeyData);
+      }
       publicKey = await subtle.importKey("spki", publicKeyData, algorithm, false, ["verify"]);
-    } catch (error) {
+    } catch (unknownError: unknown) {
+      // First cast to Error type if applicable
+      const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
+
+      // Determine detailed error reason
+      let detailedReason = "Unknown reason";
+      let errorCategory = "KEY_IMPORT_ERROR";
+
+      // Categorize the error
+      if (error.name === "DataError") {
+        detailedReason = "Key data format is invalid or incompatible";
+        errorCategory = "INVALID_KEY_FORMAT";
+      } else if (error.name === "NotSupportedError") {
+        detailedReason = "Algorithm or parameters not supported";
+        errorCategory = "UNSUPPORTED_ALGORITHM";
+      } else if (error.message.includes("namedCurve")) {
+        detailedReason = "Missing or invalid namedCurve parameter";
+        errorCategory = "INVALID_CURVE";
+      } else if (error.message.includes("hash")) {
+        detailedReason = "Incompatible or unsupported hash algorithm";
+        errorCategory = "INVALID_HASH";
+      }
+
+      // Add ECDSA-specific diagnostics
+      if (algorithm.name === "ECDSA") {
+        const keyLength = publicKeyData.byteLength;
+        detailedReason += ` (Key length: ${keyLength})`;
+      }
+
       return {
         isValid: false,
-        reason: `Failed to import public key: ${error instanceof Error ? error.message : String(error)}`,
+        reason: `Failed to import public key: ${detailedReason}`,
+        errorDetails: {
+          category: errorCategory,
+          originalMessage: error.message,
+          algorithm: { ...algorithm },
+          environment: isBrowser() ? "browser" : "node",
+          keyLength: publicKeyData.byteLength,
+        },
       };
     }
 
@@ -428,11 +475,27 @@ export async function verifySignature(
     options.verifyTime || signatureInfo.signingTime,
   );
 
+  // If certificate validation failed, add detailed error
+  if (!certResult.isValid) {
+    const certErrorMsg = `Certificate validation error: ${certResult.reason || "Unknown reason"}`;
+    errors.push(certErrorMsg);
+  }
+
   // Verify checksums
   const checksumResult =
     options.verifyChecksums !== false
       ? await verifyChecksums(signatureInfo, files)
       : { isValid: true, details: {} };
+
+  // If checksum validation failed, add detailed error
+  if (!checksumResult.isValid) {
+    const failedChecksums = Object.entries(checksumResult.details)
+      .filter(([_, details]) => !details.matches)
+      .map(([filename]) => filename)
+      .join(", ");
+
+    errors.push(`Checksum validation failed for files: ${failedChecksums}`);
+  }
 
   // Verify XML signature if we have the necessary components
   let signatureResult: SignatureVerificationResult = { isValid: true };
@@ -467,8 +530,27 @@ export async function verifySignature(
       signatureInfo.canonicalizationMethod,
     );
 
+    // If signature validation failed, add detailed error
     if (!signatureResult.isValid) {
-      errors.push(signatureResult.reason || "XML signature verification failed");
+      // Format a detailed error message with the error details
+      let detailedErrorMessage = signatureResult.reason || "XML signature verification failed";
+
+      // Add error details if available
+      if (signatureResult.errorDetails) {
+        const details = signatureResult.errorDetails;
+        detailedErrorMessage += ` [Category: ${details.category}, Environment: ${details.environment}`;
+        if (details.algorithm) {
+          detailedErrorMessage += `, Algorithm: ${details.algorithm.name}`;
+          if (details.algorithm.namedCurve) {
+            detailedErrorMessage += `, Curve: ${details.algorithm.namedCurve}`;
+          }
+        }
+        if (details.keyLength) {
+          detailedErrorMessage += `, Key length: ${details.keyLength} bytes`;
+        }
+        detailedErrorMessage += `]`;
+      }
+      errors.push(detailedErrorMessage);
     }
   } else if (options.verifySignatures !== false) {
     // Missing information for signature verification
