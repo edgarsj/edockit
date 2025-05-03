@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*" # This triggers the workflow when you push a tag that starts with 'v'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create release for"
+        required: true
+        default: ""
 
 jobs:
   # First, run all the same checks from your CI workflow
