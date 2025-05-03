@@ -62,7 +62,7 @@ jobs:
   # Create a GitHub release to document the changes
   create-github-release:
     name: Create GitHub Release
-    needs: publish
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: write # Required for creating releases
