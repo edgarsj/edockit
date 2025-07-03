@@ -5,7 +5,7 @@ import { parseCertificate, getSignerDisplayName } from "../src/core/certificate"
 import { verifyChecksums, verifySignature } from "../src/core/verification";
 
 describe("eDoc/ASiC-E Files Validation", () => {
-  const fileExtensions = [".edoc", ".asice"];
+  const fileExtensions = [".edoc", ".asice", ".sce"];
 
   // Helper to fetch sample files
   const fetchSample = async (relativePath: string): Promise<ArrayBuffer | null> => {

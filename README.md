@@ -8,7 +8,7 @@ A JavaScript/TypeScript library for viewing and verifying EU standard ASiC-E con
 
 ## About
 
-This library supports standard European ASiC-E (.asice) containers as defined by the ETSI standards. Latvian eDoc (.edoc) files are effectively ASiC-E containers with a different file extension, so they are also supported. While the core functionality exists, extensive testing with real-world documents from various EU countries is still needed to ensure complete compatibility across different implementations.
+This library supports standard European ASiC-E (.asice, .sce) containers as defined by the ETSI standards. Latvian eDoc (.edoc) files are effectively ASiC-E containers with a different file extension, so they are also supported. While the core functionality exists, extensive testing with real-world documents from various EU countries is still needed to ensure complete compatibility across different implementations.
 
 ## Installation
 
