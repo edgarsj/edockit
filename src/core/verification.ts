@@ -164,13 +164,31 @@ function nodeDigest(fileContent: Uint8Array, hashAlgo: string): Promise<string> 
 }
 
 /**
+ * Parse digest algorithm URI to normalized algorithm name
+ * @param algorithmUri The algorithm URI (e.g., http://www.w3.org/2001/04/xmlenc#sha256)
+ * @returns Normalized algorithm name (e.g., SHA-256)
+ */
+function parseDigestAlgorithmUri(algorithmUri: string): string {
+  const uri = algorithmUri.toLowerCase();
+  if (uri.includes("sha512")) return "SHA-512";
+  if (uri.includes("sha384")) return "SHA-384";
+  if (uri.includes("sha256")) return "SHA-256";
+  if (uri.includes("sha1")) return "SHA-1";
+  return "SHA-256"; // Default fallback
+}
+
+/**
  * Verify checksums of files against signature
  * @param signature The signature information
  * @param files Map of filenames to file contents
  * @returns Promise with verification results for each file
  */
 export async function verifyChecksums(
-  signature: { signedChecksums: Record<string, string>; algorithm?: string },
+  signature: {
+    signedChecksums: Record<string, string>;
+    digestAlgorithms?: Record<string, string>;
+    algorithm?: string;
+  },
   files: Map<string, Uint8Array>,
 ): Promise<ChecksumVerificationResult> {
   const results: Record<
@@ -185,20 +203,26 @@ export async function verifyChecksums(
 
   let allValid = true;
 
-  // Determine hash algorithm from signature algorithm or use default
-  let digestAlgorithm = "SHA-256";
+  // Default digest algorithm from signature algorithm (fallback if per-file not available)
+  let defaultDigestAlgorithm = "SHA-256";
   if (signature.algorithm) {
     if (signature.algorithm.includes("sha1")) {
-      digestAlgorithm = "SHA-1";
+      defaultDigestAlgorithm = "SHA-1";
     } else if (signature.algorithm.includes("sha384")) {
-      digestAlgorithm = "SHA-384";
+      defaultDigestAlgorithm = "SHA-384";
     } else if (signature.algorithm.includes("sha512")) {
-      digestAlgorithm = "SHA-512";
+      defaultDigestAlgorithm = "SHA-512";
     }
   }
 
   const checksumPromises = Object.entries(signature.signedChecksums).map(
     async ([filename, expectedChecksum]) => {
+      // Get the per-file digest algorithm, or fall back to default
+      const digestAlgorithm =
+        signature.digestAlgorithms?.[filename]
+          ? parseDigestAlgorithmUri(signature.digestAlgorithms[filename])
+          : defaultDigestAlgorithm;
+
       // Check if file exists in the container
       const fileContent = files.get(filename);
 
@@ -512,15 +536,34 @@ export async function verifySignature(
       name: "RSASSA-PKCS1-v1_5",
       hash: "SHA-256",
     };
-
-    if (algorithm.includes("ecdsa-sha256")) {
+    if (algorithm.includes("ecdsa") && signatureInfo.publicKey.namedCurve) {
+      keyAlgorithm.namedCurve = signatureInfo.publicKey.namedCurve;
       keyAlgorithm.name = "ECDSA";
+    }
+    if (algorithm.includes("ecdsa-sha256")) {
       keyAlgorithm.hash = "SHA-256";
-      if (signatureInfo.publicKey.namedCurve) {
-        keyAlgorithm.namedCurve = signatureInfo.publicKey.namedCurve;
-      }
+    } else if (algorithm.includes("ecdsa-sha384")) {
+      keyAlgorithm.hash = "SHA-384";
+    } else if (algorithm.includes("ecdsa-sha512")) {
+      keyAlgorithm.hash = "SHA-512";
     } else if (algorithm.includes("rsa-sha1")) {
       keyAlgorithm.hash = "SHA-1";
+    } else if (algorithm.includes("rsa-pss")) {
+      keyAlgorithm.name = "RSA-PSS";
+      keyAlgorithm.saltLength = 32; // Default salt length (adjust based on hash size)
+      if (algorithm.includes("sha384")) {
+        keyAlgorithm.hash = "SHA-384";
+        keyAlgorithm.saltLength = 48;
+      } else if (algorithm.includes("sha512")) {
+        keyAlgorithm.hash = "SHA-512";
+        keyAlgorithm.saltLength = 64;
+      } else {
+        keyAlgorithm.hash = "SHA-256"; // Default
+      }
+    } else if (algorithm.includes("rsa-sha384")) {
+      keyAlgorithm.hash = "SHA-384";
+    } else if (algorithm.includes("rsa-sha512")) {
+      keyAlgorithm.hash = "SHA-512";
     }
     signatureResult = await verifySignedInfo(
       signatureInfo.rawXml,

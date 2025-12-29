@@ -20,6 +20,7 @@ export interface SignatureInfo {
     rawData: ArrayBuffer; // Raw public key data
   };
   signedChecksums: Record<string, string>;
+  digestAlgorithms?: Record<string, string>; // DigestMethod algorithm per file
   signerInfo?: {
     commonName?: string;
     organization?: string;

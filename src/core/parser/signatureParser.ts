@@ -210,6 +210,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   // Get references and checksums
   const references: string[] = [];
   const signedChecksums: Record<string, string> = {};
+  const digestAlgorithms: Record<string, string> = {};
 
   const referenceElements = querySelectorAll(signedInfo, "ds\\:Reference, Reference");
 
@@ -234,6 +235,15 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     const cleanUri = decodedUri.startsWith("./") ? decodedUri.substring(2) : decodedUri;
     references.push(cleanUri);
 
+    // Find DigestMethod algorithm
+    const digestMethodEl = querySelector(reference, "ds\\:DigestMethod, DigestMethod");
+    if (digestMethodEl) {
+      const algo = digestMethodEl.getAttribute("Algorithm");
+      if (algo) {
+        digestAlgorithms[cleanUri] = algo;
+      }
+    }
+
     // Find DigestValue
     const digestValueEl = querySelector(reference, "ds\\:DigestValue, DigestValue");
     if (digestValueEl && digestValueEl.textContent) {
@@ -249,6 +259,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     publicKey,
     signerInfo,
     signedChecksums,
+    digestAlgorithms,
     references,
     algorithm: signatureAlgorithm,
     signatureValue,
