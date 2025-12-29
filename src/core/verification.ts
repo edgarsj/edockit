@@ -5,7 +5,8 @@ import { createXMLParser, querySelector } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
-import { checkCertificateRevocation, RevocationResult } from "./revocation";
+import { checkCertificateRevocation } from "./revocation/check";
+import { RevocationResult } from "./revocation/types";
 
 /**
  * Options for verification process
