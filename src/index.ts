@@ -5,18 +5,10 @@ import {
 } from "./core/canonicalization/XMLCanonicalizer";
 import { parseCertificate, getSignerDisplayName, formatValidityPeriod } from "./core/certificate";
 import { verifyChecksums, verifySignature } from "./core/verification";
-import {
-  checkCertificateRevocation,
-  RevocationResult,
-  RevocationCheckOptions,
-} from "./core/revocation";
-import {
-  parseTimestamp,
-  verifyTimestamp,
-  getTimestampTime,
-  TimestampInfo,
-  TimestampVerificationResult,
-} from "./core/timestamp";
+import { checkCertificateRevocation } from "./core/revocation/check";
+import { RevocationResult, RevocationCheckOptions } from "./core/revocation/types";
+import { parseTimestamp, verifyTimestamp, getTimestampTime } from "./core/timestamp/verify";
+import { TimestampInfo, TimestampVerificationResult } from "./core/timestamp/types";
 
 export {
   // Core functionality

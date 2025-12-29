@@ -5,6 +5,8 @@ import { AsnConvert } from "@peculiar/asn1-schema";
 import { ContentInfo, SignedData } from "@peculiar/asn1-cms";
 import { TSTInfo } from "@peculiar/asn1-tsp";
 import { TimestampInfo, TimestampVerificationResult, TimestampVerificationOptions } from "./types";
+import { checkCertificateRevocation } from "../revocation/check";
+import { RevocationResult } from "../revocation/types";
 
 /**
  * OID for SignedData content type
@@ -276,6 +278,8 @@ export async function verifyTimestamp(
   }
 
   // Verify TSA certificate if requested
+  let tsaRevocation: RevocationResult | undefined;
+
   if (options.verifyTsaCertificate && info.tsaCertificate) {
     try {
       const tsaCert = new X509Certificate(info.tsaCertificate);
@@ -290,7 +294,34 @@ export async function verifyTimestamp(
         };
       }
 
-      // TODO: Verify TSA certificate chain and revocation if checkTsaRevocation is true
+      // Check TSA certificate revocation if requested
+      if (options.checkTsaRevocation !== false) {
+        try {
+          tsaRevocation = await checkCertificateRevocation(tsaCert);
+
+          // If TSA certificate is revoked, the timestamp is invalid
+          if (tsaRevocation.status === "revoked") {
+            return {
+              isValid: false,
+              info,
+              coversSignature,
+              tsaRevocation,
+              reason: `TSA certificate has been revoked: ${tsaRevocation.reason || "No reason provided"}`,
+            };
+          }
+          // Note: 'unknown' status is a soft fail - timestamp remains valid
+          // but user can check tsaRevocation.status to see if it couldn't be verified
+        } catch (error) {
+          // Revocation check failed - soft fail, add to result but don't invalidate
+          tsaRevocation = {
+            isValid: false,
+            status: "error",
+            method: "none",
+            reason: `TSA revocation check failed: ${error instanceof Error ? error.message : String(error)}`,
+            checkedAt: new Date(),
+          };
+        }
+      }
     } catch (error) {
       return {
         isValid: false,
@@ -305,6 +336,7 @@ export async function verifyTimestamp(
     isValid: true,
     info,
     coversSignature,
+    tsaRevocation,
     reason: coversSignatureReason,
   };
 }

@@ -1,5 +1,7 @@
 // src/core/timestamp/types.ts
 
+import { RevocationResult } from "../revocation/types";
+
 /**
  * Parsed timestamp information from RFC 3161 TimeStampToken
  */
@@ -34,6 +36,8 @@ export interface TimestampVerificationResult {
   reason?: string;
   /** Whether the timestamp covers the signature value correctly */
   coversSignature?: boolean;
+  /** TSA certificate revocation check result (if checkTsaRevocation was enabled) */
+  tsaRevocation?: RevocationResult;
 }
 
 /**

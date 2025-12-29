@@ -7,7 +7,7 @@ import {
   verifyTimestamp,
   verifyTimestampCoversSignature,
   getTimestampTime,
-} from "../../src/core/timestamp";
+} from "../../src/core/timestamp/verify";
 
 const sampleFilePath = join(__dirname, "../fixtures/valid_samples/SampleFile.edoc");
 

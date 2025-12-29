@@ -6,7 +6,7 @@ import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/X
 import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
-import { RevocationResult } from "./revocation/types";
+import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp, getTimestampTime } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
 
@@ -20,6 +20,8 @@ export interface VerificationOptions {
   verifyTime?: Date;
   /** Check certificate revocation via OCSP/CRL (default: true) */
   checkRevocation?: boolean;
+  /** Options for revocation checking (timeouts, etc.) */
+  revocationOptions?: RevocationCheckOptions;
   /** Verify RFC 3161 timestamp if present (default: true) */
   verifyTimestamps?: boolean;
 }
@@ -536,6 +538,7 @@ export async function verifySignature(
     try {
       const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
         certificateChain: signatureInfo.certificateChain,
+        ...options.revocationOptions,
       });
 
       certResult.revocation = revocationResult;
