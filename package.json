@@ -12,6 +12,7 @@
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "prepublishOnly": "npm run build",
+    "prepare": "simple-git-hooks",
     "test:integration": "jest tests/integration --silent",
     "test:integration:verbose": "jest tests/integration",
     "test:browser": "web-test-runner",
@@ -52,10 +53,12 @@
     "@web/test-runner": "^0.20.1",
     "@web/test-runner-chrome": "^0.18.1",
     "jest": "^29.7.0",
+    "lint-staged": "^16.2.7",
     "prettier": "^3.5.3",
     "rimraf": "^6.0.1",
     "rollup": "^2.79.2",
     "rollup-plugin-esbuild": "^6.2.1",
+    "simple-git-hooks": "^2.13.1",
     "ts-jest": "^29.2.6",
     "typescript": "^5.8.2"
   },
@@ -74,5 +77,11 @@
   "bugs": {
     "url": "https://github.com/edgarsj/edockit/issues"
   },
-  "homepage": "https://github.com/edgarsj/edockit#readme"
+  "homepage": "https://github.com/edgarsj/edockit#readme",
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.{ts,js}": "prettier --check"
+  }
 }
