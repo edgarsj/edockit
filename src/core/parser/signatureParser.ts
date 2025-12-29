@@ -283,6 +283,16 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     }
   }
 
+  // Extract signature timestamp (RFC 3161) from xades:SignatureTimeStamp
+  let signatureTimestamp: string | undefined;
+  const timestampElement = querySelector(
+    xmlDoc,
+    "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
+  );
+  if (timestampElement && timestampElement.textContent) {
+    signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
+  }
+
   return {
     id: signatureId,
     signingTime,
@@ -298,6 +308,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     signatureValue,
     signedInfoXml,
     canonicalizationMethod,
+    signatureTimestamp,
   };
 }
 

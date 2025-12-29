@@ -10,6 +10,13 @@ import {
   RevocationResult,
   RevocationCheckOptions,
 } from "./core/revocation";
+import {
+  parseTimestamp,
+  verifyTimestamp,
+  getTimestampTime,
+  TimestampInfo,
+  TimestampVerificationResult,
+} from "./core/timestamp";
 
 export {
   // Core functionality
@@ -33,4 +40,11 @@ export {
   checkCertificateRevocation,
   RevocationResult,
   RevocationCheckOptions,
+
+  // Timestamp verification
+  parseTimestamp,
+  verifyTimestamp,
+  getTimestampTime,
+  TimestampInfo,
+  TimestampVerificationResult,
 };
