@@ -43,9 +43,13 @@ export async function checkCertificateRevocation(
     };
   }
 
+  // Track results from attempted methods
+  let ocspResult: RevocationResult | null = null;
+  let crlResult: RevocationResult | null = null;
+
   // Try OCSP first
   if (opts.ocspEnabled) {
-    const ocspResult = await checkOCSP(x509Cert, null, {
+    ocspResult = await checkOCSP(x509Cert, null, {
       timeout: opts.ocspTimeout,
       certificateChain: opts.certificateChain,
     });
@@ -60,7 +64,7 @@ export async function checkCertificateRevocation(
 
   // Try CRL
   if (opts.crlEnabled) {
-    const crlResult = await checkCRL(x509Cert, {
+    crlResult = await checkCRL(x509Cert, {
       timeout: opts.crlTimeout,
     });
 
@@ -68,17 +72,18 @@ export async function checkCertificateRevocation(
     if (crlResult.status === "good" || crlResult.status === "revoked") {
       return crlResult;
     }
-
-    // CRL also failed
-    return crlResult;
   }
 
-  // Both methods disabled or failed
+  // Both methods failed or disabled - return consistent structure
+  const errors: string[] = [];
+  if (ocspResult?.reason) errors.push(`OCSP: ${ocspResult.reason}`);
+  if (crlResult?.reason) errors.push(`CRL: ${crlResult.reason}`);
+
   return {
     isValid: false,
     status: "unknown",
     method: "none",
-    reason: "No revocation checking method available or all methods failed",
+    reason: errors.length > 0 ? errors.join("; ") : "No revocation checking method available",
     checkedAt: now,
   };
 }

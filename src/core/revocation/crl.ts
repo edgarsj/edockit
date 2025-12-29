@@ -3,6 +3,7 @@
 import { X509Certificate, X509Crl, CRLDistributionPointsExtension } from "@peculiar/x509";
 import { RevocationResult } from "./types";
 import { fetchCRL } from "./fetch";
+import { arrayBufferToBase64 } from "../../utils/encoding";
 
 /**
  * OID for CRL Distribution Points extension
@@ -58,11 +59,11 @@ export function isSerialInCRL(
   crl: X509Crl,
   serialNumber: string,
 ): { isRevoked: boolean; revokedAt?: Date; reason?: number } {
-  // Normalize serial number (remove leading zeros, lowercase)
-  const normalizedSerial = serialNumber.toLowerCase().replace(/^0+/, "");
+  // Normalize serial number (remove leading zeros but keep at least one digit, lowercase)
+  const normalizedSerial = serialNumber.toLowerCase().replace(/^0+(?=.)/, "") || "0";
 
   for (const entry of crl.entries) {
-    const entrySerial = entry.serialNumber.toLowerCase().replace(/^0+/, "");
+    const entrySerial = entry.serialNumber.toLowerCase().replace(/^0+(?=.)/, "") || "0";
     if (entrySerial === normalizedSerial) {
       return {
         isRevoked: true,
@@ -87,7 +88,7 @@ export function parseCRL(data: ArrayBuffer): X509Crl | null {
   } catch {
     try {
       // Try converting to PEM
-      const base64 = Buffer.from(data).toString("base64");
+      const base64 = arrayBufferToBase64(data);
       const lines = base64.match(/.{1,64}/g) || [];
       const pem = `-----BEGIN X509 CRL-----\n${lines.join("\n")}\n-----END X509 CRL-----`;
       return new X509Crl(pem);
