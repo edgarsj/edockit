@@ -14,6 +14,7 @@ export interface SignatureInfo {
   signingTime: Date;
   certificate: string;
   certificatePEM: string; // Formatted PEM certificate
+  certificateChain?: string[]; // Full certificate chain in PEM format (issuer certs)
   publicKey?: {
     algorithm: string; // Algorithm name (RSASSA-PKCS1-v1_5, ECDSA, etc.)
     namedCurve?: string; // For ECDSA keys

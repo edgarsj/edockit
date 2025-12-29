@@ -5,6 +5,8 @@ import { createXMLParser, querySelector } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
+import { checkCertificateRevocation } from "./revocation/check";
+import { RevocationResult } from "./revocation/types";
 
 /**
  * Options for verification process
@@ -14,6 +16,8 @@ export interface VerificationOptions {
   verifySignatures?: boolean;
   verifyChecksums?: boolean;
   verifyTime?: Date;
+  /** Check certificate revocation via OCSP/CRL (default: true) */
+  checkRevocation?: boolean;
 }
 
 /**
@@ -54,6 +58,8 @@ export interface CertificateVerificationResult {
   isValid: boolean;
   reason?: string;
   info?: CertificateInfo;
+  /** Revocation check result (if checkRevocation was enabled) */
+  revocation?: RevocationResult;
 }
 
 /**
@@ -492,7 +498,7 @@ export async function verifySignature(
 ): Promise<VerificationResult> {
   const errors: string[] = [];
 
-  // Verify certificate
+  // Verify certificate (time validity)
   const certResult = await verifyCertificate(
     signatureInfo.certificatePEM,
     options.verifyTime || signatureInfo.signingTime,
@@ -502,6 +508,35 @@ export async function verifySignature(
   if (!certResult.isValid) {
     const certErrorMsg = `Certificate validation error: ${certResult.reason || "Unknown reason"}`;
     errors.push(certErrorMsg);
+  }
+
+  // Check certificate revocation (default: enabled)
+  if (options.checkRevocation !== false && certResult.isValid) {
+    try {
+      const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
+        certificateChain: signatureInfo.certificateChain,
+      });
+
+      certResult.revocation = revocationResult;
+
+      // If certificate is revoked, mark certificate as invalid
+      if (revocationResult.status === "revoked") {
+        certResult.isValid = false;
+        certResult.reason = revocationResult.reason || "Certificate has been revoked";
+        errors.push(`Certificate revoked: ${revocationResult.reason || "No reason provided"}`);
+      }
+      // Note: 'unknown' status is a soft fail - certificate remains valid
+      // but user can check revocation.status to see if it couldn't be verified
+    } catch (error) {
+      // Revocation check failed - soft fail, add to result but don't invalidate
+      certResult.revocation = {
+        isValid: false,
+        status: "error",
+        method: "none",
+        reason: `Revocation check failed: ${error instanceof Error ? error.message : String(error)}`,
+        checkedAt: new Date(),
+      };
+    }
   }
 
   // Verify checksums

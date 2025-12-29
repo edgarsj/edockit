@@ -21,7 +21,9 @@ describe("Signature Verification", () => {
     const mockFiles = new Map<string, Uint8Array>();
     mockFiles.set("test.pdf", new TextEncoder().encode("Mock PDF content"));
 
-    const result = await verifySignature(mockSignature, mockFiles);
+    const result = await verifySignature(mockSignature, mockFiles, {
+      checkRevocation: false, // Disable for unit tests
+    });
 
     // For now, just check the structure
     expect(result).toHaveProperty("isValid");
