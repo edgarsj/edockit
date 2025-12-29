@@ -15,7 +15,7 @@ import { AlgorithmIdentifier } from "@peculiar/asn1-x509";
 import { OctetString } from "@peculiar/asn1-schema";
 import { RevocationResult } from "./types";
 import { fetchOCSP, fetchIssuerCertificate } from "./fetch";
-import { arrayBufferToBase64 } from "../../utils/encoding";
+import { arrayBufferToBase64, arrayBufferToPEM, hexToArrayBuffer } from "../../utils/encoding";
 
 /**
  * OID for Authority Information Access extension
@@ -140,15 +140,6 @@ export async function fetchIssuerFromAIA(
 }
 
 /**
- * Convert ArrayBuffer to PEM format
- */
-function arrayBufferToPEM(buffer: ArrayBuffer): string {
-  const base64 = arrayBufferToBase64(buffer);
-  const lines = base64.match(/.{1,64}/g) || [];
-  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
-}
-
-/**
  * Build OCSP request for a certificate
  * @param cert Certificate to check
  * @param issuerCert Issuer certificate
@@ -188,17 +179,6 @@ export async function buildOCSPRequest(
   const ocspRequest = new OCSPRequest({ tbsRequest });
 
   return AsnConvert.serialize(ocspRequest);
-}
-
-/**
- * Convert hex string to ArrayBuffer
- */
-function hexToArrayBuffer(hex: string): ArrayBuffer {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes.buffer;
 }
 
 /**

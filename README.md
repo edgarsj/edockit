@@ -39,18 +39,21 @@ const container = parseEdoc(fileBuffer);
 // List files in container
 console.log(Array.from(container.files.keys()));
 
-// Verify a signature (with optional revocation checking)
+// Verify a signature (with revocation and timestamp checking)
 const result = await verifySignature(container.signatures[0], container.files, {
-  checkRevocation: true,  // Enable OCSP/CRL checking (defaults to false)
-  ocspTimeout: 5000,      // OCSP request timeout in ms (defaults to 5000)
-  crlTimeout: 10000,      // CRL fetch timeout in ms (defaults to 10000)
-  verifyTime: new Date()  // Verify certificate at specific time (defaults to now)
+  checkRevocation: true,   // OCSP/CRL checking (default: true)
+  revocationOptions: {     // Optional: configure revocation check behavior
+    ocspTimeout: 5000,     // OCSP request timeout in ms (default: 5000)
+    crlTimeout: 10000,     // CRL fetch timeout in ms (default: 10000)
+  },
+  verifyTimestamps: true,  // RFC 3161 timestamp verification (default: true)
+  verifyTime: new Date()   // Verify certificate at specific time (default: timestamp time if present, otherwise now)
 });
 // result = {
 //   isValid: boolean,                // Overall validity
 //   certificate: {
 //     isValid: boolean,              // Certificate validity (time-based)
-//     revocation: {                  // Revocation check result (if checkRevocation: true)
+//     revocation: {                  // Revocation check result
 //       status: 'good' | 'revoked' | 'unknown' | 'error',
 //       method: 'ocsp' | 'crl' | 'none',
 //       checkedAt: Date,
@@ -59,6 +62,12 @@ const result = await verifySignature(container.signatures[0], container.files, {
 //   },
 //   checksums: {isValid: boolean},   // File checksums validation result
 //   signature: {isValid: boolean},   // XML signature validation result
+//   timestamp: {                     // Timestamp verification (if present)
+//     isValid: boolean,
+//     info: { genTime: Date, policy: string, ... },
+//     coversSignature: boolean,
+//     tsaRevocation: { status, method, ... }
+//   },
 //   errors: string[]                 // Any validation errors (if present)
 // }
 console.log(`Signature valid: ${result.isValid}`);
@@ -74,12 +83,17 @@ import { parseEdoc, verifySignature } from "edockit";
 const fileBuffer = readFileSync("document.asice");
 const container = parseEdoc(fileBuffer);
 
-// Check signatures with revocation checking
+// Check signatures with revocation and timestamp checking
 for (const signature of container.signatures) {
   const result = await verifySignature(signature, container.files, {
-    checkRevocation: true
+    checkRevocation: true,
+    verifyTimestamps: true
   });
   console.log(`Signature valid: ${result.isValid}`);
+
+  if (result.timestamp?.info) {
+    console.log(`Signed at (TSA): ${result.timestamp.info.genTime}`);
+  }
 
   if (result.certificate.revocation) {
     console.log(`Revocation status: ${result.certificate.revocation.status}`);
@@ -88,7 +102,6 @@ for (const signature of container.signatures) {
   if (!result.isValid && result.errors) {
     console.log(`Errors: ${result.errors.join(', ')}`);
   }
-}
 }
 ```
 
@@ -106,15 +119,49 @@ async function verifyDocument(url) {
   console.log("Documents:", container.documentFileList);
 
   for (const signature of container.signatures) {
-    const result = await verifySignature(signature, container.files, {
-      checkRevocation: true,
-    });
+    const result = await verifySignature(signature, container.files);
+    // checkRevocation and verifyTimestamps default to true
+
     console.log(`Valid: ${result.isValid}`);
+
+    if (result.timestamp?.info) {
+      console.log(`Timestamp: ${result.timestamp.info.genTime}`);
+    }
     if (result.certificate.revocation) {
       console.log(`Revocation: ${result.certificate.revocation.status}`);
     }
   }
 }
+```
+
+### Timestamp Utilities
+
+For advanced timestamp handling, you can use the timestamp utilities directly:
+
+```typescript
+import { parseTimestamp, verifyTimestamp, getTimestampTime } from 'edockit';
+
+// Get timestamp time from a signature (quick utility)
+const timestampTime = getTimestampTime(signature.signatureTimestamp);
+console.log(`Signed at: ${timestampTime}`);
+
+// Parse timestamp for detailed info
+const info = parseTimestamp(signature.signatureTimestamp);
+// info = {
+//   genTime: Date,           // When TSA signed
+//   policy: string,          // TSA policy OID
+//   hashAlgorithm: string,   // e.g., 'SHA-256'
+//   messageImprint: string,  // Hash of timestamped data
+//   tsaName?: string,        // TSA name
+//   tsaCertificate?: string, // TSA cert in PEM format
+// }
+
+// Verify timestamp with options
+const result = await verifyTimestamp(signature.signatureTimestamp, {
+  signatureValue: signature.signatureValue,  // Verify timestamp covers this signature
+  verifyTsaCertificate: true,                // Check TSA cert validity
+  checkTsaRevocation: true,                  // Check TSA cert revocation
+});
 ```
 
 ## Features
@@ -124,7 +171,8 @@ async function verifyDocument(url) {
 - Extract and display signature information
 - Verify XML signatures against file checksums
 - Validate certificate validity (time-based)
-- Optional OCSP/CRL revocation checking with soft-fail behavior (network errors don't invalidate signatures)
+- RFC 3161 timestamp verification (when present, certificate is validated at the trusted TSA timestamp time)
+- OCSP/CRL revocation checking for both signer and TSA certificates (soft-fail behavior - network errors don't invalidate signatures)
 
 ## Testing Status
 

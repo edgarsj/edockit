@@ -6,7 +6,10 @@ import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/X
 import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
-import { RevocationResult } from "./revocation/types";
+import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
+import { verifyTimestamp, getTimestampTime } from "./timestamp/verify";
+import { TimestampVerificationResult } from "./timestamp/types";
+import { base64ToUint8Array } from "../utils/encoding";
 
 /**
  * Options for verification process
@@ -18,6 +21,10 @@ export interface VerificationOptions {
   verifyTime?: Date;
   /** Check certificate revocation via OCSP/CRL (default: true) */
   checkRevocation?: boolean;
+  /** Options for revocation checking (timeouts, etc.) */
+  revocationOptions?: RevocationCheckOptions;
+  /** Verify RFC 3161 timestamp if present (default: true) */
+  verifyTimestamps?: boolean;
 }
 
 /**
@@ -70,6 +77,8 @@ export interface VerificationResult {
   certificate: CertificateVerificationResult;
   checksums: ChecksumVerificationResult;
   signature?: SignatureVerificationResult;
+  /** Timestamp verification result (if timestamp present and verifyTimestamps enabled) */
+  timestamp?: TimestampVerificationResult;
   errors?: string[];
 }
 
@@ -338,27 +347,6 @@ function getCryptoSubtle(): SubtleCrypto {
 }
 
 /**
- * Base64 decode a string in a cross-platform way
- * @param base64 Base64 encoded string
- * @returns Uint8Array of decoded bytes
- */
-function base64ToUint8Array(base64: string): Uint8Array {
-  if (typeof atob === "function") {
-    // Browser approach
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-  } else {
-    // Node.js approach
-    const buffer = Buffer.from(base64, "base64");
-    return new Uint8Array(buffer);
-  }
-}
-
-/**
  * Verify the XML signature specifically using SignedInfo and SignatureValue
  * @param signatureXml The XML string of the SignedInfo element
  * @param signatureValue The base64-encoded signature value
@@ -497,12 +485,27 @@ export async function verifySignature(
   options: VerificationOptions = {},
 ): Promise<VerificationResult> {
   const errors: string[] = [];
+  let timestampResult: TimestampVerificationResult | undefined;
 
-  // Verify certificate (time validity)
-  const certResult = await verifyCertificate(
-    signatureInfo.certificatePEM,
-    options.verifyTime || signatureInfo.signingTime,
-  );
+  // Verify timestamp first (if present) to get trusted time for cert validation
+  let trustedSigningTime: Date = options.verifyTime || signatureInfo.signingTime;
+
+  if (signatureInfo.signatureTimestamp && options.verifyTimestamps !== false) {
+    timestampResult = await verifyTimestamp(signatureInfo.signatureTimestamp, {
+      signatureValue: signatureInfo.signatureValue,
+      verifyTsaCertificate: true,
+    });
+
+    if (timestampResult.isValid && timestampResult.info) {
+      // Use timestamp time as the trusted signing time
+      trustedSigningTime = timestampResult.info.genTime;
+    } else if (!timestampResult.isValid) {
+      errors.push(`Timestamp verification failed: ${timestampResult.reason || "Unknown reason"}`);
+    }
+  }
+
+  // Verify certificate (time validity) - use trusted timestamp time if available
+  const certResult = await verifyCertificate(signatureInfo.certificatePEM, trustedSigningTime);
 
   // If certificate validation failed, add detailed error
   if (!certResult.isValid) {
@@ -515,6 +518,7 @@ export async function verifySignature(
     try {
       const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
         certificateChain: signatureInfo.certificateChain,
+        ...options.revocationOptions,
       });
 
       certResult.revocation = revocationResult;
@@ -644,7 +648,14 @@ export async function verifySignature(
   }
 
   // Determine overall validity
-  const isValid = certResult.isValid && checksumResult.isValid && signatureResult.isValid;
+  // Timestamp failure only affects validity if timestamp was present and verification was enabled
+  const timestampValid =
+    !signatureInfo.signatureTimestamp ||
+    options.verifyTimestamps === false ||
+    (timestampResult?.isValid ?? true);
+
+  const isValid =
+    certResult.isValid && checksumResult.isValid && signatureResult.isValid && timestampValid;
 
   // Return the complete result
   return {
@@ -652,6 +663,7 @@ export async function verifySignature(
     certificate: certResult,
     checksums: checksumResult,
     signature: options.verifySignatures !== false ? signatureResult : undefined,
+    timestamp: timestampResult,
     errors: errors.length > 0 ? errors : undefined,
   };
 }

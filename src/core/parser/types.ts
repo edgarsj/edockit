@@ -41,4 +41,6 @@ export interface SignatureInfo {
   signedInfoXml?: string; // The XML string of the SignedInfo element
   rawXml?: string; // The full raw XML of the signature
   canonicalizationMethod?: string; // The canonicalization method used
+  /** RFC 3161 timestamp token (base64 encoded) from xades:EncapsulatedTimeStamp */
+  signatureTimestamp?: string;
 }
