@@ -106,9 +106,9 @@ export function parseCRL(data: ArrayBuffer): X509Crl | null {
  */
 export async function checkCRL(
   cert: X509Certificate,
-  options: { timeout?: number } = {},
+  options: { timeout?: number; proxyUrl?: string } = {},
 ): Promise<RevocationResult> {
-  const { timeout = 10000 } = options;
+  const { timeout = 10000, proxyUrl } = options;
   const now = new Date();
 
   // Get CRL URLs
@@ -128,7 +128,7 @@ export async function checkCRL(
 
   for (const url of crlUrls) {
     try {
-      const result = await fetchCRL(url, timeout);
+      const result = await fetchCRL(url, timeout, proxyUrl);
 
       if (!result.ok || !result.data) {
         errors.push(`${url}: ${result.error || "Failed to fetch"}`);
