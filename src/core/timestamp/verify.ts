@@ -7,6 +7,12 @@ import { TSTInfo } from "@peculiar/asn1-tsp";
 import { TimestampInfo, TimestampVerificationResult, TimestampVerificationOptions } from "./types";
 import { checkCertificateRevocation } from "../revocation/check";
 import { RevocationResult } from "../revocation/types";
+import {
+  arrayBufferToHex,
+  arrayBufferToBase64,
+  base64ToArrayBuffer,
+  arrayBufferToPEM,
+} from "../../utils/encoding";
 
 /**
  * OID for SignedData content type
@@ -17,39 +23,6 @@ const id_signedData = "1.2.840.113549.1.7.2";
  * OID for TSTInfo content type
  */
 const id_ct_TSTInfo = "1.2.840.113549.1.9.16.1.4";
-
-/**
- * Convert ArrayBuffer to hex string
- */
-function bufferToHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/**
- * Convert ArrayBuffer to base64 string
- */
-function bufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Decode base64 to ArrayBuffer
- */
-function base64ToBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
 
 /**
  * Get hash algorithm name from OID
@@ -65,22 +38,13 @@ function getHashAlgorithmName(oid: string): string {
 }
 
 /**
- * Format certificate as PEM
- */
-function formatPEM(derBytes: ArrayBuffer): string {
-  const base64 = bufferToBase64(derBytes);
-  const lines = base64.match(/.{1,64}/g) || [];
-  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
-}
-
-/**
  * Parse RFC 3161 TimeStampToken from base64
  * @param timestampBase64 Base64-encoded timestamp token
  * @returns Parsed timestamp info or null if parsing fails
  */
 export function parseTimestamp(timestampBase64: string): TimestampInfo | null {
   try {
-    const tokenBuffer = base64ToBuffer(timestampBase64);
+    const tokenBuffer = base64ToArrayBuffer(timestampBase64);
 
     // Parse as ContentInfo (TimeStampToken extends ContentInfo)
     const contentInfo = AsnConvert.parse(tokenBuffer, ContentInfo);
@@ -127,7 +91,7 @@ export function parseTimestamp(timestampBase64: string): TimestampInfo | null {
       // Get the first certificate (usually the TSA cert)
       const cert = signedData.certificates[0];
       if ("certificate" in cert && cert.certificate) {
-        tsaCertificate = formatPEM(AsnConvert.serialize(cert.certificate));
+        tsaCertificate = arrayBufferToPEM(AsnConvert.serialize(cert.certificate));
       }
     }
 
@@ -153,9 +117,9 @@ export function parseTimestamp(timestampBase64: string): TimestampInfo | null {
     return {
       genTime: tstInfo.genTime,
       policy: tstInfo.policy,
-      serialNumber: bufferToHex(tstInfo.serialNumber),
+      serialNumber: arrayBufferToHex(tstInfo.serialNumber),
       hashAlgorithm: getHashAlgorithmName(tstInfo.messageImprint.hashAlgorithm.algorithm),
-      messageImprint: bufferToHex(tstInfo.messageImprint.hashedMessage.buffer),
+      messageImprint: arrayBufferToHex(tstInfo.messageImprint.hashedMessage.buffer),
       tsaName,
       tsaCertificate,
       accuracy,
@@ -214,9 +178,9 @@ export async function verifyTimestampCoversSignature(
     const messageImprintLower = timestampInfo.messageImprint.toLowerCase();
 
     // Try 1: Hash of decoded signature value bytes (standard approach)
-    const signatureValue = base64ToBuffer(signatureValueBase64);
+    const signatureValue = base64ToArrayBuffer(signatureValueBase64);
     const computedHash = await computeHash(signatureValue, timestampInfo.hashAlgorithm);
-    const computedHashHex = bufferToHex(computedHash);
+    const computedHashHex = arrayBufferToHex(computedHash);
 
     if (computedHashHex.toLowerCase() === messageImprintLower) {
       return true;
@@ -229,7 +193,7 @@ export async function verifyTimestampCoversSignature(
       base64Bytes.buffer as ArrayBuffer,
       timestampInfo.hashAlgorithm,
     );
-    const base64HashHex = bufferToHex(base64Hash);
+    const base64HashHex = arrayBufferToHex(base64Hash);
 
     if (base64HashHex.toLowerCase() === messageImprintLower) {
       return true;

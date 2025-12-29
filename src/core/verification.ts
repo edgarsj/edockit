@@ -9,6 +9,7 @@ import { checkCertificateRevocation } from "./revocation/check";
 import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp, getTimestampTime } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
+import { base64ToUint8Array } from "../utils/encoding";
 
 /**
  * Options for verification process
@@ -342,27 +343,6 @@ function getCryptoSubtle(): SubtleCrypto {
   } else {
     // In Node.js environment
     return crypto.subtle;
-  }
-}
-
-/**
- * Base64 decode a string in a cross-platform way
- * @param base64 Base64 encoded string
- * @returns Uint8Array of decoded bytes
- */
-function base64ToUint8Array(base64: string): Uint8Array {
-  if (typeof atob === "function") {
-    // Browser approach
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-  } else {
-    // Node.js approach
-    const buffer = Buffer.from(base64, "base64");
-    return new Uint8Array(buffer);
   }
 }
 
