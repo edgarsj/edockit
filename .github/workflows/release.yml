@@ -78,6 +78,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          # Extract the section for this version from CHANGELOG.md
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"  # Remove 'v' prefix
+
+          # Extract content between this version header and the next version header
+          NOTES=$(awk -v ver="$VERSION_NUM" '
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          # Write to file to preserve newlines
+          echo "$NOTES" > release_notes.md
+
       - name: Create Release
         uses: actions/create-release@v1
         env:
@@ -87,5 +107,4 @@ jobs:
           release_name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          # Optionally, you can auto-generate release notes
-          generate_release_notes: true
+          body_path: release_notes.md
