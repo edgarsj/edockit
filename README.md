@@ -45,6 +45,7 @@ const result = await verifySignature(container.signatures[0], container.files, {
   revocationOptions: {     // Optional: configure revocation check behavior
     ocspTimeout: 5000,     // OCSP request timeout in ms (default: 5000)
     crlTimeout: 10000,     // CRL fetch timeout in ms (default: 10000)
+    proxyUrl: 'https://cors-proxy.example.com/?url=',  // CORS proxy for browser (optional)
   },
   verifyTimestamps: true,  // RFC 3161 timestamp verification (default: true)
   verifyTime: new Date()   // Verify certificate at specific time (default: timestamp time if present, otherwise now)
@@ -119,8 +120,13 @@ async function verifyDocument(url) {
   console.log("Documents:", container.documentFileList);
 
   for (const signature of container.signatures) {
-    const result = await verifySignature(signature, container.files);
-    // checkRevocation and verifyTimestamps default to true
+    const result = await verifySignature(signature, container.files, {
+      checkRevocation: true,
+      revocationOptions: {
+        // Use a CORS proxy for OCSP/CRL requests in browser environments
+        proxyUrl: 'https://your-cors-proxy.example.com/?url=',
+      },
+    });
 
     console.log(`Valid: ${result.isValid}`);
 
@@ -133,6 +139,8 @@ async function verifyDocument(url) {
   }
 }
 ```
+
+> **Note:** OCSP and CRL endpoints typically don't support CORS, so browser environments need a proxy to perform revocation checks. The `proxyUrl` option routes all revocation requests through the specified proxy, which should accept the original URL as a query parameter.
 
 ### Timestamp Utilities
 
