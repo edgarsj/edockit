@@ -5,6 +5,11 @@ import {
 } from "./core/canonicalization/XMLCanonicalizer";
 import { parseCertificate, getSignerDisplayName, formatValidityPeriod } from "./core/certificate";
 import { verifyChecksums, verifySignature } from "./core/verification";
+import {
+  checkCertificateRevocation,
+  RevocationResult,
+  RevocationCheckOptions,
+} from "./core/revocation";
 
 export {
   // Core functionality
@@ -23,4 +28,9 @@ export {
   // Verification
   verifyChecksums,
   verifySignature,
+
+  // Revocation checking
+  checkCertificateRevocation,
+  RevocationResult,
+  RevocationCheckOptions,
 };

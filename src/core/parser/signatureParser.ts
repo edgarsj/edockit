@@ -152,27 +152,59 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   const signatureValueEl = querySelector(signatureElement, "ds\\:SignatureValue, SignatureValue");
   const signatureValue = signatureValueEl?.textContent?.replace(/\s+/g, "") || "";
 
-  // Get certificate
-  const certElement = querySelector(signatureElement, "ds\\:X509Certificate, X509Certificate");
+  // Get certificate(s)
   let certificate = "";
   let certificatePEM = "";
+  let certificateChain: string[] = [];
   let signerInfo = undefined;
   let publicKey = undefined;
 
-  if (!certElement) {
-    // Try to find via KeyInfo path
-    const keyInfo = querySelector(signatureElement, "ds\\:KeyInfo, KeyInfo");
-    if (keyInfo) {
-      const x509Data = querySelector(keyInfo, "ds\\:X509Data, X509Data");
-      if (x509Data) {
-        const nestedCert = querySelector(x509Data, "ds\\:X509Certificate, X509Certificate");
-        if (nestedCert) {
-          certificate = nestedCert.textContent?.replace(/\s+/g, "") || "";
+  // First, try to find the main certificate from KeyInfo/X509Data
+  const keyInfo = querySelector(signatureElement, "ds\\:KeyInfo, KeyInfo");
+  if (keyInfo) {
+    const x509Data = querySelector(keyInfo, "ds\\:X509Data, X509Data");
+    if (x509Data) {
+      // Get all certificates in X509Data
+      const certElements = querySelectorAll(x509Data, "ds\\:X509Certificate, X509Certificate");
+      if (certElements.length > 0) {
+        // First cert is the signer certificate
+        certificate = certElements[0].textContent?.replace(/\s+/g, "") || "";
+        // Additional certs are part of the chain
+        for (let i = 1; i < certElements.length; i++) {
+          const chainCert = certElements[i].textContent?.replace(/\s+/g, "") || "";
+          if (chainCert) {
+            certificateChain.push(formatPEM(chainCert));
+          }
         }
       }
     }
-  } else {
-    certificate = certElement.textContent?.replace(/\s+/g, "") || "";
+  }
+
+  // Fallback: try direct X509Certificate selector if not found via KeyInfo
+  if (!certificate) {
+    const certElement = querySelector(signatureElement, "ds\\:X509Certificate, X509Certificate");
+    if (certElement) {
+      certificate = certElement.textContent?.replace(/\s+/g, "") || "";
+    }
+  }
+
+  // Also look for XAdES CertificateValues (contains full chain excluding signer)
+  const certValues = querySelector(xmlDoc, "xades\\:CertificateValues, CertificateValues");
+  if (certValues) {
+    const encapsulatedCerts = querySelectorAll(
+      certValues,
+      "xades\\:EncapsulatedX509Certificate, EncapsulatedX509Certificate",
+    );
+    for (const encCert of encapsulatedCerts) {
+      const chainCert = encCert.textContent?.replace(/\s+/g, "") || "";
+      if (chainCert) {
+        const chainPEM = formatPEM(chainCert);
+        // Avoid duplicates
+        if (!certificateChain.includes(chainPEM)) {
+          certificateChain.push(chainPEM);
+        }
+      }
+    }
   }
 
   if (certificate) {
@@ -256,6 +288,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     signingTime,
     certificate,
     certificatePEM,
+    certificateChain: certificateChain.length > 0 ? certificateChain : undefined,
     publicKey,
     signerInfo,
     signedChecksums,

@@ -87,10 +87,11 @@ describe("eDoc Parser and Verification Tests", () => {
       // Checksums should be valid
       expect(checksumResults.isValid).toBe(true);
 
-      // Perform a complete signature verification
+      // Perform a complete signature verification (disable revocation for faster tests)
       console.log("\nPerforming complete signature verification...");
       const verificationResult = await verifySignature(signature, container.files, {
         verifyTime: signature.signingTime,
+        checkRevocation: false,
       });
 
       console.log("\nVerification result:");

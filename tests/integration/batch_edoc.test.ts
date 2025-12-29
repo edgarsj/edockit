@@ -113,10 +113,11 @@ const verifyEdocFiles = async (
       );
     }
 
-    // Verify full signature
+    // Verify full signature (disable revocation checking for faster tests)
     try {
       const verificationResult = await verifySignature(signature, container.files, {
         verifyTime: signature.signingTime,
+        checkRevocation: false,
       });
 
       if (!verificationResult.isValid) {
