@@ -154,6 +154,7 @@ async function computeHash(data: ArrayBuffer, algorithm: string): Promise<ArrayB
   }
 
   // Node.js fallback
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const nodeCrypto = require("crypto");
   const hash = nodeCrypto.createHash(algorithm.toLowerCase().replace("-", ""));
   hash.update(Buffer.from(data));
