@@ -16,6 +16,12 @@ export interface FetchOptions {
   contentType?: string;
   /** Accept header */
   accept?: string;
+  /**
+   * CORS proxy URL for browser environments.
+   * When set, the original URL will be URL-encoded and appended to this proxy URL.
+   * Example: "https://cors-proxy.example.com/?url="
+   */
+  proxyUrl?: string;
 }
 
 export interface FetchResult {
@@ -32,7 +38,10 @@ export interface FetchResult {
  * @returns FetchResult with binary data or error
  */
 export async function fetchBinary(url: string, options: FetchOptions = {}): Promise<FetchResult> {
-  const { timeout = 10000, method = "GET", body, contentType, accept } = options;
+  const { timeout = 10000, method = "GET", body, contentType, accept, proxyUrl } = options;
+
+  // Apply proxy URL if provided
+  const fetchUrl = proxyUrl ? `${proxyUrl}${encodeURIComponent(url)}` : url;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -46,7 +55,7 @@ export async function fetchBinary(url: string, options: FetchOptions = {}): Prom
       headers["Accept"] = accept;
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(fetchUrl, {
       method,
       headers,
       body: body ? new Uint8Array(body) : undefined,
@@ -100,12 +109,14 @@ export async function fetchBinary(url: string, options: FetchOptions = {}): Prom
  * @param url OCSP responder URL
  * @param request DER-encoded OCSP request
  * @param timeout Timeout in milliseconds
+ * @param proxyUrl Optional CORS proxy URL
  * @returns FetchResult with OCSP response data
  */
 export async function fetchOCSP(
   url: string,
   request: ArrayBuffer,
   timeout: number = 5000,
+  proxyUrl?: string,
 ): Promise<FetchResult> {
   return fetchBinary(url, {
     method: "POST",
@@ -113,6 +124,7 @@ export async function fetchOCSP(
     contentType: "application/ocsp-request",
     accept: "application/ocsp-response",
     timeout,
+    proxyUrl,
   });
 }
 
@@ -120,13 +132,19 @@ export async function fetchOCSP(
  * Fetch CRL from distribution point
  * @param url CRL distribution point URL
  * @param timeout Timeout in milliseconds
+ * @param proxyUrl Optional CORS proxy URL
  * @returns FetchResult with CRL data
  */
-export async function fetchCRL(url: string, timeout: number = 10000): Promise<FetchResult> {
+export async function fetchCRL(
+  url: string,
+  timeout: number = 10000,
+  proxyUrl?: string,
+): Promise<FetchResult> {
   return fetchBinary(url, {
     method: "GET",
     accept: "application/pkix-crl",
     timeout,
+    proxyUrl,
   });
 }
 
@@ -134,15 +152,18 @@ export async function fetchCRL(url: string, timeout: number = 10000): Promise<Fe
  * Fetch issuer certificate from AIA extension
  * @param url CA Issuers URL
  * @param timeout Timeout in milliseconds
+ * @param proxyUrl Optional CORS proxy URL
  * @returns FetchResult with certificate data
  */
 export async function fetchIssuerCertificate(
   url: string,
   timeout: number = 5000,
+  proxyUrl?: string,
 ): Promise<FetchResult> {
   return fetchBinary(url, {
     method: "GET",
     accept: "application/pkix-cert",
     timeout,
+    proxyUrl,
   });
 }

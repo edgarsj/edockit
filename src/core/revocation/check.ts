@@ -52,6 +52,7 @@ export async function checkCertificateRevocation(
     ocspResult = await checkOCSP(x509Cert, null, {
       timeout: opts.ocspTimeout,
       certificateChain: opts.certificateChain,
+      proxyUrl: options.proxyUrl,
     });
 
     // If OCSP gives a definitive answer (good or revoked), use it
@@ -66,6 +67,7 @@ export async function checkCertificateRevocation(
   if (opts.crlEnabled) {
     crlResult = await checkCRL(x509Cert, {
       timeout: opts.crlTimeout,
+      proxyUrl: options.proxyUrl,
     });
 
     // If CRL gives a definitive answer, use it

@@ -32,13 +32,20 @@ export interface RevocationCheckOptions {
   crlTimeout?: number;
   /** Certificate chain for finding issuer (PEM strings) */
   certificateChain?: string[];
+  /**
+   * CORS proxy URL for browser environments.
+   * When set, all OCSP/CRL fetch requests will be routed through this proxy.
+   * The original URL will be URL-encoded and appended as a query parameter.
+   * Example: "https://cors-proxy.example.com/?url="
+   */
+  proxyUrl?: string;
 }
 
 /**
  * Default options for revocation checking
  */
 export const DEFAULT_REVOCATION_OPTIONS: Required<
-  Omit<RevocationCheckOptions, "certificateChain">
+  Omit<RevocationCheckOptions, "certificateChain" | "proxyUrl">
 > = {
   ocspEnabled: true,
   crlEnabled: true,

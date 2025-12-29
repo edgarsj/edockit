@@ -110,17 +110,19 @@ export function findIssuerInChain(cert: X509Certificate, chain: string[]): X509C
  * Fetch issuer certificate from AIA extension
  * @param cert Certificate to fetch issuer for
  * @param timeout Timeout in ms
+ * @param proxyUrl Optional CORS proxy URL
  * @returns Issuer certificate or null
  */
 export async function fetchIssuerFromAIA(
   cert: X509Certificate,
   timeout: number = 5000,
+  proxyUrl?: string,
 ): Promise<X509Certificate | null> {
   const urls = extractCAIssuersUrls(cert);
 
   for (const url of urls) {
     try {
-      const result = await fetchIssuerCertificate(url, timeout);
+      const result = await fetchIssuerCertificate(url, timeout, proxyUrl);
       if (result.ok && result.data) {
         // Try to parse as DER first, then PEM
         try {
@@ -336,9 +338,9 @@ export function parseOCSPResponse(responseData: ArrayBuffer): RevocationResult {
 export async function checkOCSP(
   cert: X509Certificate,
   issuerCert: X509Certificate | null,
-  options: { timeout?: number; certificateChain?: string[] } = {},
+  options: { timeout?: number; certificateChain?: string[]; proxyUrl?: string } = {},
 ): Promise<RevocationResult> {
-  const { timeout = 5000, certificateChain = [] } = options;
+  const { timeout = 5000, certificateChain = [], proxyUrl } = options;
   const now = new Date();
 
   // Get OCSP URLs
@@ -361,7 +363,7 @@ export async function checkOCSP(
   }
   if (!issuer) {
     // Try AIA extension
-    issuer = await fetchIssuerFromAIA(cert, timeout);
+    issuer = await fetchIssuerFromAIA(cert, timeout, proxyUrl);
   }
   if (!issuer) {
     return {
@@ -390,7 +392,7 @@ export async function checkOCSP(
   // Try each OCSP URL
   for (const url of ocspUrls) {
     try {
-      const result = await fetchOCSP(url, request, timeout);
+      const result = await fetchOCSP(url, request, timeout, proxyUrl);
       if (result.ok && result.data) {
         return parseOCSPResponse(result.data);
       }
