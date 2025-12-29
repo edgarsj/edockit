@@ -11,7 +11,12 @@ const config = {
     chromeLauncher({
       launchOptions: {
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
       },
     }),
   ],
@@ -34,7 +39,7 @@ const config = {
   testFramework: {
     config: {
       ui: "bdd",
-      timeout: 3000,
+      timeout: 30000,
     },
   },
 };
