@@ -494,6 +494,7 @@ export async function verifySignature(
     timestampResult = await verifyTimestamp(signatureInfo.signatureTimestamp, {
       signatureValue: signatureInfo.signatureValue,
       verifyTsaCertificate: true,
+      revocationOptions: options.revocationOptions,
     });
 
     if (timestampResult.isValid && timestampResult.info) {

@@ -125,9 +125,16 @@ export function queryByXPath(
 ): Element | null {
   try {
     // Browser environment with native XPath
-    if (typeof document !== "undefined" && document.evaluate) {
+    if (typeof document !== "undefined" && typeof document.evaluate === "function") {
+      // Use the document that owns the parent node, not the global document
+      const ownerDoc = "ownerDocument" in parent ? parent.ownerDocument : parent;
+      if (!ownerDoc || typeof ownerDoc.evaluate !== "function") {
+        // XMLDocuments from DOMParser don't have evaluate - silently return null
+        // (caller should use DOM traversal fallback)
+        return null;
+      }
       const nsResolver = createNsResolverForBrowser(namespaces);
-      const result = document.evaluate(
+      const result = ownerDoc.evaluate(
         xpathExpression,
         parent,
         nsResolver,
@@ -187,9 +194,16 @@ export function queryAllByXPath(
 ): Element[] {
   try {
     // Browser environment with native XPath
-    if (typeof document !== "undefined" && document.evaluate) {
+    if (typeof document !== "undefined" && typeof document.evaluate === "function") {
+      // Use the document that owns the parent node, not the global document
+      const ownerDoc = "ownerDocument" in parent ? parent.ownerDocument : parent;
+      if (!ownerDoc || typeof ownerDoc.evaluate !== "function") {
+        // XMLDocuments from DOMParser don't have evaluate - silently return empty
+        // (caller should use DOM traversal fallback)
+        return [];
+      }
       const nsResolver = createNsResolverForBrowser(namespaces);
-      const result = document.evaluate(
+      const result = ownerDoc.evaluate(
         xpathExpression,
         parent,
         nsResolver,
