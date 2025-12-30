@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-12-30
+
+### Fixed
+
+- **proxyUrl now works for timestamp revocation** - TSA certificate revocation checks now correctly use the proxy
+- **XPath DOM mismatch error in browser** - Fixed "Node cannot be used in a document other than the one in which it was created" error when parsing XML in browsers
+
 ## [0.2.1] - 2025-12-30
 
 ### Added
@@ -47,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File checksum verification (SHA-256/384/512)
 - Browser and Node.js support
 
+[0.2.2]: https://github.com/edgarsj/edockit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/edgarsj/edockit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/edgarsj/edockit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/edgarsj/edockit/releases/tag/v0.1.2
