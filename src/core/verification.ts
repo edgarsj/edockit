@@ -527,23 +527,25 @@ export async function verifySignature(
       // If certificate is revoked, check if signature was made before revocation (LTV)
       if (revocationResult.status === "revoked") {
         const revokedAt = revocationResult.revokedAt;
+        const hasValidRevocationTime = revokedAt && revokedAt.getTime() > 0;
 
         // Long-Term Validation: if we have a trusted timestamp proving the signature
         // was made before revocation, the signature is still valid
-        if (revokedAt && trustedSigningTime < revokedAt) {
+        if (hasValidRevocationTime && trustedSigningTime < revokedAt) {
           // Signature was made before revocation - still valid (LTV)
           certResult.revocation.isValid = true;
           certResult.revocation.reason = `Certificate was revoked on ${revokedAt.toISOString()}, but signature was made on ${trustedSigningTime.toISOString()} (before revocation)`;
         } else {
-          // Signature was made after revocation or no revocation date available
+          // Signature was made after revocation or no valid revocation date available
           certResult.isValid = false;
-          const revokedAtStr = revokedAt ? ` on ${revokedAt.toISOString()}` : "";
-          certResult.reason = `Certificate was revoked${revokedAtStr}`;
-          errors.push(`Certificate revoked${revokedAtStr}`);
+          const revokedAtStr = hasValidRevocationTime ? ` on ${revokedAt.toISOString()}` : "";
+          certResult.reason =
+            revocationResult.reason || `Certificate has been revoked${revokedAtStr}`;
+          errors.push(revocationResult.reason || `Certificate revoked${revokedAtStr}`);
         }
       }
       // Note: 'unknown' status is a soft fail - certificate remains valid
-      // but user can check revocation.status to see if it couldn't be verified
+      // but user can check revocation.status to see the actual status
     } catch (error) {
       // Revocation check failed - soft fail, add to result but don't invalidate
       certResult.revocation = {

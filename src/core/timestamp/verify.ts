@@ -275,7 +275,7 @@ export async function verifyTimestamp(
             };
           }
           // Note: 'unknown' status is a soft fail - timestamp remains valid
-          // but user can check tsaRevocation.status to see if it couldn't be verified
+          // but user can check tsaRevocation.status to see the actual status
         } catch (error) {
           // Revocation check failed - soft fail, add to result but don't invalidate
           tsaRevocation = {
