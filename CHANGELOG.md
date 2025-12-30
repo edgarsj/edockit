@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **OCSP issuerKeyHash calculation** - Fixed critical bug where OCSP requests used wrong hash (full SPKI instead of public key BIT STRING), causing incorrect revocation status responses
+- **Timestamp signature coverage verification** - Now correctly verifies that timestamps cover the canonicalized ds:SignatureValue XML element per XAdES (ETSI EN 319 132-1) specification, fixing `coversSignature: false` issue
+- **TSA name formatting** - Fixed timestamp TSA name showing as `[object Object]` instead of readable DN string like `CN=..., O=..., C=...`
+- **Base64 whitespace handling** - Fixed browser `atob` errors when decoding base64 strings containing whitespace from XML
 
 ## [0.2.3] - 2025-12-30
 
