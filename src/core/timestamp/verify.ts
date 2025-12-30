@@ -262,7 +262,7 @@ export async function verifyTimestamp(
       // Check TSA certificate revocation if requested
       if (options.checkTsaRevocation !== false) {
         try {
-          tsaRevocation = await checkCertificateRevocation(tsaCert);
+          tsaRevocation = await checkCertificateRevocation(tsaCert, options.revocationOptions);
 
           // If TSA certificate is revoked, the timestamp is invalid
           if (tsaRevocation.status === "revoked") {
