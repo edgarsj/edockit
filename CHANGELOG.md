@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Timestamp signature coverage verification** - Now correctly verifies that timestamps cover the canonicalized ds:SignatureValue XML element per XAdES (ETSI EN 319 132-1) specification, fixing `coversSignature: false` issue
 - **TSA name formatting** - Fixed timestamp TSA name showing as `[object Object]` instead of readable DN string like `CN=..., O=..., C=...`
 - **Base64 whitespace handling** - Fixed browser `atob` errors when decoding base64 strings containing whitespace from XML
+- **ECDSA signature format normalization** - Fixed signature verification failures for ECDSA signatures with leading zero padding by normalizing to IEEE P1363 format expected by Web Crypto API
 
 ## [0.2.3] - 2025-12-30
 

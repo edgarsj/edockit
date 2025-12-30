@@ -334,6 +334,130 @@ export async function verifyCertificate(
 }
 
 /**
+ * Get the expected component size for an ECDSA curve
+ */
+function getEcdsaComponentSize(namedCurve?: string): number {
+  switch (namedCurve) {
+    case "P-256":
+      return 32;
+    case "P-384":
+      return 48;
+    case "P-521":
+      return 66;
+    default:
+      return 32; // Default to P-256
+  }
+}
+
+/**
+ * Normalize ECDSA signature to IEEE P1363 format (raw R||S) expected by Web Crypto API
+ * Handles both raw format with potential padding and DER-encoded signatures
+ */
+function normalizeEcdsaSignature(signatureBytes: Uint8Array, namedCurve?: string): Uint8Array {
+  const componentSize = getEcdsaComponentSize(namedCurve);
+  const expectedLength = componentSize * 2;
+
+  // If already correct length, return as-is
+  if (signatureBytes.length === expectedLength) {
+    return signatureBytes;
+  }
+
+  // Check if it's DER-encoded (starts with SEQUENCE tag 0x30)
+  if (signatureBytes[0] === 0x30) {
+    return derToRawEcdsa(signatureBytes, componentSize);
+  }
+
+  // Handle raw R||S with potential leading zeros
+  // Some implementations pad R and S with leading zeros
+  if (signatureBytes.length > expectedLength) {
+    const halfLength = signatureBytes.length / 2;
+    if (Number.isInteger(halfLength)) {
+      const r = signatureBytes.slice(0, halfLength);
+      const s = signatureBytes.slice(halfLength);
+
+      // Normalize R and S to exact component size
+      const normalizedR = normalizeComponent(r, componentSize);
+      const normalizedS = normalizeComponent(s, componentSize);
+
+      const result = new Uint8Array(expectedLength);
+      result.set(normalizedR, 0);
+      result.set(normalizedS, componentSize);
+      return result;
+    }
+  }
+
+  // Return as-is if we can't normalize
+  return signatureBytes;
+}
+
+/**
+ * Normalize a single ECDSA component (R or S) to exact size
+ * Strips leading zeros or pads with leading zeros as needed
+ */
+function normalizeComponent(component: Uint8Array, size: number): Uint8Array {
+  // Strip leading zeros
+  let start = 0;
+  while (start < component.length - 1 && component[start] === 0) {
+    start++;
+  }
+  const stripped = component.slice(start);
+
+  if (stripped.length === size) {
+    return stripped;
+  } else if (stripped.length < size) {
+    // Pad with leading zeros
+    const padded = new Uint8Array(size);
+    padded.set(stripped, size - stripped.length);
+    return padded;
+  } else {
+    // Component too large - take the last 'size' bytes
+    return stripped.slice(stripped.length - size);
+  }
+}
+
+/**
+ * Convert DER-encoded ECDSA signature to raw IEEE P1363 format
+ */
+function derToRawEcdsa(derSignature: Uint8Array, componentSize: number): Uint8Array {
+  // DER structure: SEQUENCE { INTEGER r, INTEGER s }
+  // 0x30 len 0x02 rLen r... 0x02 sLen s...
+
+  let offset = 0;
+
+  // Skip SEQUENCE tag
+  if (derSignature[offset++] !== 0x30) {
+    throw new Error("Invalid DER signature: missing SEQUENCE tag");
+  }
+
+  // Skip sequence length (may be 1 or 2 bytes)
+  const seqLen = derSignature[offset++];
+  if (seqLen & 0x80) {
+    offset += seqLen & 0x7f; // Skip length bytes
+  }
+
+  // Parse R
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error("Invalid DER signature: missing INTEGER tag for R");
+  }
+  const rLen = derSignature[offset++];
+  const r = derSignature.slice(offset, offset + rLen);
+  offset += rLen;
+
+  // Parse S
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error("Invalid DER signature: missing INTEGER tag for S");
+  }
+  const sLen = derSignature[offset++];
+  const s = derSignature.slice(offset, offset + sLen);
+
+  // Normalize and concatenate
+  const result = new Uint8Array(componentSize * 2);
+  result.set(normalizeComponent(r, componentSize), 0);
+  result.set(normalizeComponent(s, componentSize), componentSize);
+  return result;
+}
+
+/**
  * Safely get the crypto.subtle implementation in either browser or Node.js
  * @returns The SubtleCrypto interface
  */
@@ -394,6 +518,11 @@ export async function verifySignedInfo(
         isValid: false,
         reason: `Failed to decode signature value: ${error instanceof Error ? error.message : String(error)}`,
       };
+    }
+
+    // For ECDSA, normalize signature to IEEE P1363 format (raw R||S) expected by Web Crypto
+    if (algorithm.name === "ECDSA") {
+      signatureBytes = normalizeEcdsaSignature(signatureBytes, algorithm.namedCurve);
     }
 
     // Import the public key
