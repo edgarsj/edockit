@@ -139,7 +139,7 @@ describe("RFC 3161 Timestamp Verification (Browser)", () => {
       }
 
       const result = await verifyTimestamp(sig.signatureTimestamp, {
-        signatureValue: sig.signatureValue,
+        canonicalSignatureValue: sig.canonicalSignatureValue,
         verifyTsaCertificate: true,
         checkTsaRevocation: false, // Disable for faster test
       });
@@ -169,7 +169,7 @@ describe("RFC 3161 Timestamp Verification (Browser)", () => {
       }
 
       const result = await verifyTimestamp(sig.signatureTimestamp, {
-        signatureValue: sig.signatureValue,
+        canonicalSignatureValue: sig.canonicalSignatureValue,
         verifyTsaCertificate: true,
         checkTsaRevocation: true,
       });

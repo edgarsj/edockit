@@ -91,8 +91,8 @@ describe("RFC 3161 Timestamp Verification", () => {
   describe("Timestamp verification", () => {
     it("should verify timestamp covers signature", async () => {
       const sig = container.signatures[0];
-      if (!sig.signatureTimestamp || !sig.signatureValue) {
-        console.log("Skipping test - no timestamp or signature value");
+      if (!sig.signatureTimestamp || !sig.canonicalSignatureValue) {
+        console.log("Skipping test - no timestamp or canonical signature value");
         return;
       }
 
@@ -104,22 +104,22 @@ describe("RFC 3161 Timestamp Verification", () => {
 
       const coversSignature = await verifyTimestampCoversSignature(
         timestampInfo,
-        sig.signatureValue,
+        sig.canonicalSignatureValue,
       );
 
       console.log("Timestamp covers signature:", coversSignature);
-      expect(typeof coversSignature).toBe("boolean");
+      expect(coversSignature).toBe(true);
     });
 
-    it("should verify timestamp with signature value", async () => {
+    it("should verify timestamp with canonical signature value", async () => {
       const sig = container.signatures[0];
-      if (!sig.signatureTimestamp) {
-        console.log("Skipping test - no timestamp in sample file");
+      if (!sig.signatureTimestamp || !sig.canonicalSignatureValue) {
+        console.log("Skipping test - no timestamp or canonical signature value");
         return;
       }
 
       const result = await verifyTimestamp(sig.signatureTimestamp, {
-        signatureValue: sig.signatureValue,
+        canonicalSignatureValue: sig.canonicalSignatureValue,
       });
 
       console.log("Timestamp verification result:", {
@@ -128,7 +128,8 @@ describe("RFC 3161 Timestamp Verification", () => {
         reason: result.reason,
       });
 
-      expect(result).toHaveProperty("isValid");
+      expect(result.isValid).toBe(true);
+      expect(result.coversSignature).toBe(true);
       expect(result).toHaveProperty("info");
     });
   });

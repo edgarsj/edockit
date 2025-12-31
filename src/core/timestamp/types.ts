@@ -44,8 +44,8 @@ export interface TimestampVerificationResult {
  * Options for timestamp verification
  */
 export interface TimestampVerificationOptions {
-  /** The signature value that the timestamp should cover (base64) */
-  signatureValue?: string;
+  /** The canonicalized ds:SignatureValue XML element (per XAdES spec) */
+  canonicalSignatureValue?: string;
   /** Verify the TSA certificate chain */
   verifyTsaCertificate?: boolean;
   /** Check TSA certificate revocation */

@@ -22,11 +22,15 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 /**
  * Convert base64 string to ArrayBuffer
+ * Handles base64 strings with whitespace (common in XML)
  */
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  // Strip whitespace (newlines, spaces, tabs) that may be present in XML
+  const cleanBase64 = base64.replace(/\s/g, "");
+
   if (typeof atob === "function") {
     // Browser
-    const binary = atob(base64);
+    const binary = atob(cleanBase64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
@@ -34,7 +38,7 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
     return bytes.buffer;
   }
   // Node.js
-  const buffer = Buffer.from(base64, "base64");
+  const buffer = Buffer.from(cleanBase64, "base64");
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 

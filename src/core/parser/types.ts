@@ -38,6 +38,7 @@ export interface SignatureInfo {
   references: string[]; // Filenames referenced by this signature
   algorithm?: string; // Signature algorithm URI
   signatureValue?: string; // Base64 signature value
+  canonicalSignatureValue?: string; // Canonicalized ds:SignatureValue element (for timestamp verification)
   signedInfoXml?: string; // The XML string of the SignedInfo element
   rawXml?: string; // The full raw XML of the signature
   canonicalizationMethod?: string; // The canonicalization method used

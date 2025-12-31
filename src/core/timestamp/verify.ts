@@ -4,6 +4,7 @@ import { X509Certificate } from "@peculiar/x509";
 import { AsnConvert } from "@peculiar/asn1-schema";
 import { ContentInfo, SignedData } from "@peculiar/asn1-cms";
 import { TSTInfo } from "@peculiar/asn1-tsp";
+import { Name } from "@peculiar/asn1-x509";
 import { TimestampInfo, TimestampVerificationResult, TimestampVerificationOptions } from "./types";
 import { checkCertificateRevocation } from "../revocation/check";
 import { RevocationResult } from "../revocation/types";
@@ -35,6 +36,40 @@ function getHashAlgorithmName(oid: string): string {
     "2.16.840.1.101.3.4.2.3": "SHA-512",
   };
   return hashAlgorithms[oid] || oid;
+}
+
+/**
+ * Common OID to attribute name mappings for X.500 distinguished names
+ */
+const oidToAttributeName: Record<string, string> = {
+  "2.5.4.3": "CN",
+  "2.5.4.6": "C",
+  "2.5.4.7": "L",
+  "2.5.4.8": "ST",
+  "2.5.4.10": "O",
+  "2.5.4.11": "OU",
+  "2.5.4.5": "serialNumber",
+  "1.2.840.113549.1.9.1": "emailAddress",
+};
+
+/**
+ * Format an X.500 Name (directoryName) to a readable string
+ * @param name The Name object to format
+ * @returns Formatted string like "CN=Example, O=Company, C=US"
+ */
+function formatDirectoryName(name: Name): string {
+  const parts: string[] = [];
+  for (const rdn of name) {
+    for (const attr of rdn) {
+      const attrName = oidToAttributeName[attr.type] || attr.type;
+      // attr.value can be various ASN.1 string types
+      const value = attr.value?.toString() || "";
+      if (value) {
+        parts.push(`${attrName}=${value}`);
+      }
+    }
+  }
+  return parts.join(", ");
 }
 
 /**
@@ -99,7 +134,7 @@ export function parseTimestamp(timestampBase64: string): TimestampInfo | null {
     let tsaName: string | undefined;
     if (tstInfo.tsa) {
       if (tstInfo.tsa.directoryName) {
-        tsaName = tstInfo.tsa.directoryName.toString();
+        tsaName = formatDirectoryName(tstInfo.tsa.directoryName);
       } else if (tstInfo.tsa.uniformResourceIdentifier) {
         tsaName = tstInfo.tsa.uniformResourceIdentifier;
       }
@@ -163,44 +198,30 @@ async function computeHash(data: ArrayBuffer, algorithm: string): Promise<ArrayB
 
 /**
  * Verify that timestamp covers the signature value
- * XAdES timestamps can cover either:
- * 1. The decoded signature value bytes (standard per ETSI EN 319 132-1)
- * 2. The base64-encoded string (some implementations)
+ *
+ * Per XAdES (ETSI EN 319 132-1), the SignatureTimeStamp covers the canonicalized
+ * ds:SignatureValue XML element, not just its base64 content.
  *
  * @param timestampInfo Parsed timestamp info
- * @param signatureValueBase64 Base64-encoded signature value
+ * @param canonicalSignatureValue Canonicalized ds:SignatureValue XML element
  * @returns True if the timestamp covers the signature
  */
 export async function verifyTimestampCoversSignature(
   timestampInfo: TimestampInfo,
-  signatureValueBase64: string,
+  canonicalSignatureValue: string,
 ): Promise<boolean> {
   try {
     const messageImprintLower = timestampInfo.messageImprint.toLowerCase();
-
-    // Try 1: Hash of decoded signature value bytes (standard approach)
-    const signatureValue = base64ToArrayBuffer(signatureValueBase64);
-    const computedHash = await computeHash(signatureValue, timestampInfo.hashAlgorithm);
-    const computedHashHex = arrayBufferToHex(computedHash);
-
-    if (computedHashHex.toLowerCase() === messageImprintLower) {
-      return true;
-    }
-
-    // Try 2: Hash of base64 string (some implementations)
     const encoder = new TextEncoder();
-    const base64Bytes = encoder.encode(signatureValueBase64);
-    const base64Hash = await computeHash(
-      base64Bytes.buffer as ArrayBuffer,
+
+    const canonicalBytes = encoder.encode(canonicalSignatureValue);
+    const canonicalHash = await computeHash(
+      canonicalBytes.buffer as ArrayBuffer,
       timestampInfo.hashAlgorithm,
     );
-    const base64HashHex = arrayBufferToHex(base64Hash);
+    const canonicalHashHex = arrayBufferToHex(canonicalHash);
 
-    if (base64HashHex.toLowerCase() === messageImprintLower) {
-      return true;
-    }
-
-    return false;
+    return canonicalHashHex.toLowerCase() === messageImprintLower;
   } catch (error) {
     console.error(
       "Failed to verify timestamp coverage:",
@@ -230,15 +251,12 @@ export async function verifyTimestamp(
   }
 
   // Verify timestamp covers the signature if provided
-  // Note: coversSignature failure is informational - the timestamp is still valid
-  // and can be used for genTime. The signature value hashing varies by implementation.
   let coversSignature: boolean | undefined;
   let coversSignatureReason: string | undefined;
-  if (options.signatureValue) {
-    coversSignature = await verifyTimestampCoversSignature(info, options.signatureValue);
+  if (options.canonicalSignatureValue) {
+    coversSignature = await verifyTimestampCoversSignature(info, options.canonicalSignatureValue);
     if (!coversSignature) {
-      coversSignatureReason =
-        "Could not verify timestamp covers signature (implementation-specific hashing)";
+      coversSignatureReason = "Could not verify timestamp covers signature (hash mismatch)";
     }
   }
 
@@ -275,7 +293,7 @@ export async function verifyTimestamp(
             };
           }
           // Note: 'unknown' status is a soft fail - timestamp remains valid
-          // but user can check tsaRevocation.status to see if it couldn't be verified
+          // but user can check tsaRevocation.status to see the actual status
         } catch (error) {
           // Revocation check failed - soft fail, add to result but don't invalidate
           tsaRevocation = {

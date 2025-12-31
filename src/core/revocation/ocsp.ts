@@ -1,7 +1,7 @@
 // src/core/revocation/ocsp.ts
 
 import { X509Certificate, AuthorityInfoAccessExtension } from "@peculiar/x509";
-import { AsnConvert } from "@peculiar/asn1-schema";
+import { AsnConvert, AsnParser } from "@peculiar/asn1-schema";
 import {
   OCSPRequest,
   OCSPResponse,
@@ -11,7 +11,7 @@ import {
   OCSPResponseStatus,
   BasicOCSPResponse,
 } from "@peculiar/asn1-ocsp";
-import { AlgorithmIdentifier } from "@peculiar/asn1-x509";
+import { AlgorithmIdentifier, Certificate } from "@peculiar/asn1-x509";
 import { OctetString } from "@peculiar/asn1-schema";
 import { RevocationResult } from "./types";
 import { fetchOCSP, fetchIssuerCertificate } from "./fetch";
@@ -152,11 +152,15 @@ export async function buildOCSPRequest(
   issuerCert: X509Certificate,
 ): Promise<ArrayBuffer> {
   // Get issuer name hash (SHA-1 of issuer's DN in DER)
-  const issuerNameDer = AsnConvert.serialize(issuerCert.subjectName.toJSON());
+  // Parse the raw certificate to get the proper ASN.1 structures for serialization
+  const issuerCertAsn = AsnParser.parse(issuerCert.rawData, Certificate);
+  const issuerNameDer = AsnConvert.serialize(issuerCertAsn.tbsCertificate.subject);
   const issuerNameHash = await computeSHA1(issuerNameDer);
 
-  // Get issuer key hash (SHA-1 of issuer's public key)
-  const issuerKeyHash = await computeSHA1(issuerCert.publicKey.rawData);
+  // Get issuer key hash (SHA-1 of issuer's public key BIT STRING value, not the full SPKI)
+  const issuerKeyHash = await computeSHA1(
+    issuerCertAsn.tbsCertificate.subjectPublicKeyInfo.subjectPublicKey,
+  );
 
   // Get certificate serial number
   const serialNumber = hexToArrayBuffer(cert.serialNumber);

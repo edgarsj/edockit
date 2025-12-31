@@ -9,7 +9,7 @@ import {
   queryByXPath,
   serializeToXML,
 } from "../../utils/xmlParser";
-import { CANONICALIZATION_METHODS } from "../canonicalization/XMLCanonicalizer";
+import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "../canonicalization/XMLCanonicalizer";
 import { extractSignerInfo } from "../certificate";
 import { SignatureInfo } from "./types";
 import { formatPEM } from "./certificateUtils";
@@ -151,6 +151,17 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   // Get signature value
   const signatureValueEl = querySelector(signatureElement, "ds\\:SignatureValue, SignatureValue");
   const signatureValue = signatureValueEl?.textContent?.replace(/\s+/g, "") || "";
+
+  // Compute canonicalized SignatureValue element for timestamp verification
+  let canonicalSignatureValue: string | undefined;
+  if (signatureValueEl) {
+    try {
+      const canonicalizer = new XMLCanonicalizer();
+      canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl);
+    } catch {
+      // Canonicalization failed - leave undefined
+    }
+  }
 
   // Get certificate(s)
   let certificate = "";
@@ -306,6 +317,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     references,
     algorithm: signatureAlgorithm,
     signatureValue,
+    canonicalSignatureValue,
     signedInfoXml,
     canonicalizationMethod,
     signatureTimestamp,
