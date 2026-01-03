@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Multi-state validation results** - `VerificationResult` now includes granular status beyond boolean `isValid`:
+  - `status`: `"VALID"` | `"INVALID"` | `"INDETERMINATE"` | `"UNSUPPORTED"`
+  - `statusMessage`: Human-readable explanation
+  - `limitations`: Array describing platform/environment constraints
+- **Platform limitation detection** - Detect unsupported RSA key sizes (>4096 bits) in Safari/WebKit and return `UNSUPPORTED` status instead of failing as `INVALID`
+- **Cross-browser testing** - Added Safari/WebKit and Firefox to browser test suite via Playwright
+
+### Fixed
+
+- **C14N 1.1 canonicalization** - Fixed bug where C14N 1.1 incorrectly added newlines between XML elements when the original had none. This caused signature verification to fail for compact XML.
+
 ## [0.2.4] - 2025-12-31
 
 ### Fixed
@@ -70,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File checksum verification (SHA-256/384/512)
 - Browser and Node.js support
 
+[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.2.4...HEAD
 [0.2.4]: https://github.com/edgarsj/edockit/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/edgarsj/edockit/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/edgarsj/edockit/compare/v0.2.1...v0.2.2

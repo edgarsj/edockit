@@ -51,7 +51,14 @@ const result = await verifySignature(container.signatures[0], container.files, {
   verifyTime: new Date()   // Verify certificate at specific time (default: timestamp time if present, otherwise now)
 });
 // result = {
-//   isValid: boolean,                // Overall validity
+//   isValid: boolean,                // Overall validity (for backwards compatibility)
+//   status: 'VALID' | 'INVALID' | 'INDETERMINATE' | 'UNSUPPORTED',  // Granular status
+//   statusMessage?: string,          // Human-readable explanation
+//   limitations?: [{                 // Platform/environment constraints (if any)
+//     code: string,                  // e.g., 'RSA_KEY_SIZE_UNSUPPORTED'
+//     description: string,
+//     platform?: string              // e.g., 'Safari/WebKit'
+//   }],
 //   certificate: {
 //     isValid: boolean,              // Certificate validity (time-based)
 //     revocation: {                  // Revocation check result
@@ -90,7 +97,22 @@ for (const signature of container.signatures) {
     checkRevocation: true,
     verifyTimestamps: true
   });
-  console.log(`Signature valid: ${result.isValid}`);
+
+  // Use granular status for detailed handling
+  console.log(`Status: ${result.status}`);  // VALID, INVALID, INDETERMINATE, or UNSUPPORTED
+
+  if (result.status === 'VALID') {
+    console.log('Signature is valid');
+  } else if (result.status === 'UNSUPPORTED') {
+    // Platform limitation (e.g., RSA >4096 bits in Safari)
+    console.log(`Cannot verify: ${result.statusMessage}`);
+  } else if (result.status === 'INDETERMINATE') {
+    // Can't conclude (e.g., revocation status unknown)
+    console.log(`Inconclusive: ${result.statusMessage}`);
+  } else {
+    // INVALID - definitely wrong
+    console.log(`Invalid: ${result.statusMessage}`);
+  }
 
   if (result.timestamp?.info) {
     console.log(`Signed at (TSA): ${result.timestamp.info.genTime}`);
@@ -98,10 +120,6 @@ for (const signature of container.signatures) {
 
   if (result.certificate.revocation) {
     console.log(`Revocation status: ${result.certificate.revocation.status}`);
-  }
-
-  if (!result.isValid && result.errors) {
-    console.log(`Errors: ${result.errors.join(', ')}`);
   }
 }
 ```
@@ -128,13 +146,18 @@ async function verifyDocument(url) {
       },
     });
 
-    console.log(`Valid: ${result.isValid}`);
+    // Handle different validation states
+    if (result.status === 'VALID') {
+      console.log('Signature verified successfully');
+    } else if (result.status === 'UNSUPPORTED') {
+      // Some signatures can't be verified in certain browsers (e.g., RSA >4096 in Safari)
+      console.log(`Browser limitation: ${result.statusMessage}`);
+    } else {
+      console.log(`${result.status}: ${result.statusMessage}`);
+    }
 
     if (result.timestamp?.info) {
       console.log(`Timestamp: ${result.timestamp.info.genTime}`);
-    }
-    if (result.certificate.revocation) {
-      console.log(`Revocation: ${result.certificate.revocation.status}`);
     }
   }
 }
