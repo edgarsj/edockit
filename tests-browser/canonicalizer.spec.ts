@@ -45,6 +45,8 @@ describe("XMLCanonicalizer", () => {
       }
     };
     it("C14N 1.0 vs 1.1 whitespace handling", () => {
+      // C14N 1.0 and C14N 1.1 should produce identical output for compact XML
+      // The difference is in xml:id normalization, not in adding formatting
       const xml = `<root><a><b>text</b></a></root>`;
       const doc = parser.parseFromString(xml, "text/xml");
 
@@ -52,7 +54,7 @@ describe("XMLCanonicalizer", () => {
       expect(c14n10).to.equal("<root><a><b>text</b></a></root>");
 
       const c14n11 = XMLCanonicalizer.c14n11(doc.documentElement as any);
-      expect(c14n11).to.equal("<root>\n<a>\n<b>text</b>\n</a>\n</root>");
+      expect(c14n11).to.equal("<root><a><b>text</b></a></root>"); // Same as C14N 1.0
     });
     it("Mixed content remains unchanged", () => {
       const xml = `<doc>Text <b>bold</b> and <i>italic</i></doc>`;
@@ -65,8 +67,26 @@ describe("XMLCanonicalizer", () => {
       expect(c14n10).to.equal("<doc>Text <b>bold</b> and <i>italic</i></doc>");
     });
 
-    it("handles multiple nested levels", () => {
+    it("handles multiple nested levels - compact XML stays compact", () => {
+      // C14N 1.1 preserves whitespace, doesn't add it
       const xml = `<doc><section><title>Header</title><content><p>Text</p></content></section></doc>`;
+      const doc = parser.parseFromString(xml, "text/xml");
+      const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
+      expect(result).to.equal(
+        "<doc><section><title>Header</title><content><p>Text</p></content></section></doc>",
+      );
+    });
+
+    it("handles multiple nested levels - preserves existing newlines", () => {
+      // C14N 1.1 preserves whitespace that exists in the original
+      const xml = `<doc>
+<section>
+<title>Header</title>
+<content>
+<p>Text</p>
+</content>
+</section>
+</doc>`;
       const doc = parser.parseFromString(xml, "text/xml");
       const result = XMLCanonicalizer.c14n11(doc.documentElement as any);
       expect(result).to.equal(
