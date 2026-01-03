@@ -16,6 +16,7 @@
     "test:integration": "jest tests/integration --silent",
     "test:integration:verbose": "jest tests/integration",
     "test:browser": "web-test-runner",
+    "test:browser:all": "ALL_BROWSERS=true web-test-runner",
     "format": "prettier --write '**/*.{ts,js}'",
     "format:check": "prettier --check '**/*.{ts,js}'"
   },
