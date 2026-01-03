@@ -49,6 +49,8 @@ export interface ChecksumVerificationResult {
 export interface SignatureVerificationResult {
   isValid: boolean;
   reason?: string;
+  /** True if verification failed due to platform limitation (e.g., RSA >4096 in Safari) */
+  unsupportedPlatform?: boolean;
   errorDetails?: {
     category: string;
     originalMessage: string;
@@ -70,10 +72,38 @@ export interface CertificateVerificationResult {
 }
 
 /**
+ * Validation status for granular verification results
+ * - VALID: Signature cryptographically valid, all checks pass
+ * - INVALID: Definitely wrong (bad checksum, tampered content, crypto failure with supported key)
+ * - INDETERMINATE: Can't conclude (expired cert without POE, missing chain, revocation unknown)
+ * - UNSUPPORTED: Platform can't verify (e.g., RSA >4096 bits in Safari/WebKit)
+ */
+export type ValidationStatus = "VALID" | "INVALID" | "INDETERMINATE" | "UNSUPPORTED";
+
+/**
+ * Describes a limitation that prevented full verification
+ */
+export interface ValidationLimitation {
+  /** Machine-readable code (e.g., 'RSA_KEY_SIZE_UNSUPPORTED', 'CERT_EXPIRED_NO_POE') */
+  code: string;
+  /** Human-readable description */
+  description: string;
+  /** Platform where this limitation applies (e.g., 'Safari/WebKit') */
+  platform?: string;
+}
+
+/**
  * Complete verification result
  */
 export interface VerificationResult {
+  /** Whether the signature is valid (for backwards compatibility) */
   isValid: boolean;
+  /** Granular validation status */
+  status: ValidationStatus;
+  /** Human-readable status explanation */
+  statusMessage?: string;
+  /** Limitations that prevented full verification (for INDETERMINATE/UNSUPPORTED) */
+  limitations?: ValidationLimitation[];
   certificate: CertificateVerificationResult;
   checksums: ChecksumVerificationResult;
   signature?: SignatureVerificationResult;
@@ -92,6 +122,108 @@ function isBrowser(): boolean {
     typeof window.crypto !== "undefined" &&
     typeof window.crypto.subtle !== "undefined"
   );
+}
+
+/**
+ * Detects if running in Safari/WebKit browser
+ * Safari/WebKit handles RSA key DER encoding correctly and doesn't need the modulus padding fix
+ * This also detects Playwright's headless WebKit
+ * @returns true if Safari/WebKit, false otherwise
+ */
+function isWebKit(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  // Detect WebKit-based browsers (Safari, or Playwright WebKit which includes "AppleWebKit" but not Chrome)
+  const hasWebKit = /AppleWebKit/.test(ua);
+  const isChromium = /Chrome/.test(ua) || /Chromium/.test(ua) || /Edg/.test(ua);
+  return hasWebKit && !isChromium;
+}
+
+/**
+ * Get RSA modulus length in bits from SPKI public key data
+ * @param publicKeyData The SPKI-formatted public key
+ * @returns Modulus length in bits, or 0 if not RSA or can't determine
+ */
+function getRSAModulusLength(publicKeyData: ArrayBuffer): number {
+  const keyBytes = new Uint8Array(publicKeyData);
+
+  // Check for RSA OID (1.2.840.113549.1.1.1)
+  const RSA_OID = [0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+  let oidPosition = -1;
+
+  for (let i = 0; i <= keyBytes.length - RSA_OID.length; i++) {
+    let match = true;
+    for (let j = 0; j < RSA_OID.length; j++) {
+      if (keyBytes[i + j] !== RSA_OID[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      oidPosition = i;
+      break;
+    }
+  }
+
+  if (oidPosition === -1) return 0; // Not RSA
+
+  // Find BIT STRING containing the key
+  let bitStringPos = -1;
+  for (let i = oidPosition + RSA_OID.length; i < keyBytes.length; i++) {
+    if (keyBytes[i] === 0x03) {
+      bitStringPos = i;
+      break;
+    }
+  }
+  if (bitStringPos === -1) return 0;
+
+  // Skip BIT STRING header to find inner SEQUENCE
+  let pos = bitStringPos + 1;
+  if ((keyBytes[pos] & 0x80) === 0) {
+    pos += 1; // short length
+  } else {
+    pos += 1 + (keyBytes[pos] & 0x7f); // long length
+  }
+  pos += 1; // skip unused bits byte
+
+  if (keyBytes[pos] !== 0x30) return 0; // Should be SEQUENCE
+
+  // Skip inner SEQUENCE header to find modulus INTEGER
+  pos += 1;
+  if ((keyBytes[pos] & 0x80) === 0) {
+    pos += 1;
+  } else {
+    pos += 1 + (keyBytes[pos] & 0x7f);
+  }
+
+  if (keyBytes[pos] !== 0x02) return 0; // Should be INTEGER (modulus)
+
+  // Get modulus length
+  pos += 1;
+  let modulusLength = 0;
+  if ((keyBytes[pos] & 0x80) === 0) {
+    modulusLength = keyBytes[pos];
+  } else {
+    const numLenBytes = keyBytes[pos] & 0x7f;
+    for (let i = 0; i < numLenBytes; i++) {
+      modulusLength = (modulusLength << 8) | keyBytes[pos + 1 + i];
+    }
+  }
+
+  // Modulus might have leading 0x00 padding byte, subtract if present
+  // Return bits (bytes * 8), accounting for padding
+  return modulusLength * 8;
+}
+
+/**
+ * Check if RSA key size is supported in the current platform
+ * Safari/WebKit only supports RSA keys up to 4096 bits
+ */
+function isRSAKeySizeSupported(modulusLengthBits: number): boolean {
+  if (!isBrowser()) return true; // Node.js supports all sizes
+  if (!isWebKit()) return true; // Chrome/Firefox support large keys
+  // Safari/WebKit: max 4096 bits
+  return modulusLengthBits <= 4096;
 }
 
 /**
@@ -529,11 +661,40 @@ export async function verifySignedInfo(
     let publicKey;
     try {
       const subtle = getCryptoSubtle();
-      if (isBrowser() && algorithm.name === "RSASSA-PKCS1-v1_5") {
-        // console.log("Browser environment detected, applying RSA key fix");
-        publicKeyData = fixRSAModulusPadding(publicKeyData);
+      const isRSA = algorithm.name === "RSASSA-PKCS1-v1_5" || algorithm.name === "RSA-PSS";
+
+      // Check RSA key size support before attempting import
+      if (isRSA) {
+        const modulusLengthBits = getRSAModulusLength(publicKeyData);
+        if (modulusLengthBits > 0 && !isRSAKeySizeSupported(modulusLengthBits)) {
+          return {
+            isValid: false,
+            unsupportedPlatform: true,
+            reason: `RSA key size (${modulusLengthBits} bits) not supported in this browser`,
+            errorDetails: {
+              category: "RSA_KEY_SIZE_UNSUPPORTED",
+              originalMessage: `Safari/WebKit only supports RSA keys up to 4096 bits`,
+              algorithm: { ...algorithm },
+              environment: "browser",
+              keyLength: publicKeyData.byteLength,
+            },
+          };
+        }
       }
-      publicKey = await subtle.importKey("spki", publicKeyData, algorithm, false, ["verify"]);
+
+      if (isBrowser() && isRSA) {
+        // Try importing original key first, then try with padding fix if it fails
+        // This handles browser differences (Chrome vs Safari/WebKit)
+        try {
+          publicKey = await subtle.importKey("spki", publicKeyData, algorithm, false, ["verify"]);
+        } catch {
+          // Original key failed, try with modulus padding fix
+          const fixedKeyData = fixRSAModulusPadding(publicKeyData);
+          publicKey = await subtle.importKey("spki", fixedKeyData, algorithm, false, ["verify"]);
+        }
+      } else {
+        publicKey = await subtle.importKey("spki", publicKeyData, algorithm, false, ["verify"]);
+      }
     } catch (unknownError: unknown) {
       // First cast to Error type if applicable
       const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
@@ -801,9 +962,74 @@ export async function verifySignature(
   const isValid =
     certResult.isValid && checksumResult.isValid && signatureResult.isValid && timestampValid;
 
+  // Determine validation status and limitations
+  let status: ValidationStatus = "VALID";
+  let statusMessage: string | undefined;
+  const limitations: ValidationLimitation[] = [];
+
+  if (!isValid) {
+    // Check for platform unsupported (RSA key size)
+    if (signatureResult.unsupportedPlatform) {
+      status = "UNSUPPORTED";
+      statusMessage = signatureResult.reason;
+      limitations.push({
+        code: "RSA_KEY_SIZE_UNSUPPORTED",
+        description: signatureResult.reason || "RSA key size not supported",
+        platform: "Safari/WebKit",
+      });
+    }
+    // Check for checksum failure (definitely invalid)
+    else if (!checksumResult.isValid) {
+      status = "INVALID";
+      statusMessage = "File integrity check failed";
+    }
+    // Check for signature crypto failure with supported key
+    else if (!signatureResult.isValid && !signatureResult.unsupportedPlatform) {
+      status = "INVALID";
+      statusMessage = signatureResult.reason || "Signature verification failed";
+    }
+    // Check for certificate issues
+    else if (!certResult.isValid) {
+      // If cert expired and no valid timestamp, it's indeterminate
+      if (certResult.reason?.includes("expired") && !timestampResult?.isValid) {
+        status = "INDETERMINATE";
+        statusMessage = "Certificate expired and no valid timestamp proof";
+        limitations.push({
+          code: "CERT_EXPIRED_NO_POE",
+          description:
+            "Certificate has expired and there is no valid timestamp to prove signature was made when certificate was valid",
+        });
+      } else if (certResult.revocation?.status === "revoked") {
+        status = "INVALID";
+        statusMessage = "Certificate has been revoked";
+      } else {
+        status = "INDETERMINATE";
+        statusMessage = certResult.reason || "Certificate validation inconclusive";
+      }
+    }
+    // Revocation unknown
+    else if (certResult.revocation?.status === "unknown") {
+      status = "INDETERMINATE";
+      statusMessage = "Certificate revocation status could not be determined";
+      limitations.push({
+        code: "REVOCATION_UNKNOWN",
+        description:
+          certResult.revocation.reason || "Could not check certificate revocation status",
+      });
+    }
+    // Fallback
+    else {
+      status = "INVALID";
+      statusMessage = errors[0] || "Verification failed";
+    }
+  }
+
   // Return the complete result
   return {
     isValid,
+    status,
+    statusMessage,
+    limitations: limitations.length > 0 ? limitations : undefined,
     certificate: certResult,
     checksums: checksumResult,
     signature: options.verifySignatures !== false ? signatureResult : undefined,

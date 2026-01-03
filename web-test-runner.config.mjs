@@ -1,6 +1,7 @@
 import { esbuildPlugin } from "@web/dev-server-esbuild";
 import { defaultReporter } from "@web/test-runner";
 import { chromeLauncher } from "@web/test-runner-chrome";
+import { playwrightLauncher } from "@web/test-runner-playwright";
 
 const config = {
   nodeResolve: true,
@@ -19,6 +20,8 @@ const config = {
         ],
       },
     }),
+    playwrightLauncher({ product: "webkit" }),
+    playwrightLauncher({ product: "firefox" }),
   ],
 
   plugins: [
