@@ -10,6 +10,7 @@ import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp, getTimestampTime } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
 import { base64ToUint8Array } from "../utils/encoding";
+import { verifyRsaWithNonStandardDigestInfo } from "./rsa-digestinfo-workaround";
 
 /**
  * Options for verification process
@@ -744,11 +745,48 @@ export async function verifySignedInfo(
       const subtle = getCryptoSubtle();
       const result = await subtle.verify(algorithm, publicKey, signatureBytes, signedData);
 
+      if (result) {
+        return {
+          isValid: true,
+        };
+      }
+
+      // Standard verification failed - try fallback for RSA signatures
+      // Some older signatures use non-standard DigestInfo format (missing NULL in AlgorithmIdentifier)
+      if (algorithm.name === "RSASSA-PKCS1-v1_5") {
+        const fallbackResult = await verifyRsaWithNonStandardDigestInfo(
+          publicKeyData,
+          signatureBytes,
+          signedData,
+          algorithm.hash,
+        );
+        if (fallbackResult) {
+          return {
+            isValid: true,
+          };
+        }
+      }
+
       return {
-        isValid: result,
-        reason: result ? undefined : "Signature verification failed",
+        isValid: false,
+        reason: "Signature verification failed",
       };
     } catch (error) {
+      // Try fallback for RSA signatures when subtle.verify throws
+      if (algorithm.name === "RSASSA-PKCS1-v1_5") {
+        const fallbackResult = await verifyRsaWithNonStandardDigestInfo(
+          publicKeyData,
+          signatureBytes,
+          signedData,
+          algorithm.hash,
+        );
+        if (fallbackResult) {
+          return {
+            isValid: true,
+          };
+        }
+      }
+
       return {
         isValid: false,
         reason: `Signature verification error: ${error instanceof Error ? error.message : String(error)}`,
@@ -1006,6 +1044,16 @@ export async function verifySignature(
         status = "INDETERMINATE";
         statusMessage = certResult.reason || "Certificate validation inconclusive";
       }
+    }
+    // Timestamp parsing/verification failed - can't establish POE
+    else if (timestampResult && !timestampResult.isValid) {
+      status = "INDETERMINATE";
+      statusMessage = timestampResult.reason || "Timestamp verification failed";
+      limitations.push({
+        code: "TIMESTAMP_VERIFICATION_FAILED",
+        description:
+          timestampResult.reason || "Could not verify timestamp to establish proof of existence",
+      });
     }
     // Revocation unknown
     else if (certResult.revocation?.status === "unknown") {

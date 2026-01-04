@@ -6,13 +6,39 @@ import {
   getSignerDisplayName,
   formatValidityPeriod,
 } from "../../src/core/certificate";
-import { verifyChecksums, verifySignature } from "../../src/core/verification";
+import { verifyChecksums, verifySignature, ValidationStatus } from "../../src/core/verification";
 
 // Path to directories containing eDoc samples
 const sensitiveSamplesDir = join(__dirname, "../fixtures/sensitive/valid_samples");
 const validSamplesDir = join(__dirname, "../fixtures/valid_samples");
 const sensitiveSamplesDirExists = existsSync(sensitiveSamplesDir);
 const validSamplesDirExists = existsSync(validSamplesDir);
+
+// File entry in filelist.json
+interface FileEntry {
+  name: string;
+  expectedStatus: ValidationStatus;
+  expectedLimitation?: string;
+  note?: string;
+}
+
+// Load filelist.json if it exists
+const loadFilelist = (directory: string): FileEntry[] | null => {
+  const filelistPath = join(directory, "filelist.json");
+  if (!existsSync(filelistPath)) return null;
+
+  try {
+    const content = readFileSync(filelistPath, "utf-8");
+    const parsed = JSON.parse(content);
+    // Support both old format (string[]) and new format ({ files: FileEntry[] })
+    if (Array.isArray(parsed)) {
+      return parsed.map((name: string) => ({ name, expectedStatus: "VALID" as ValidationStatus }));
+    }
+    return parsed.files || null;
+  } catch {
+    return null;
+  }
+};
 
 // Function to collect files with specific extensions
 const collectFiles = (directory: string, extensions: string[]): string[] => {
@@ -39,6 +65,8 @@ const verifyEdocFiles = async (
   filePath: string,
 ): Promise<{
   isValid: boolean;
+  status: ValidationStatus;
+  limitations?: { code: string }[];
   signerNames: string[];
   signingTime: string;
   validationErrors: string[];
@@ -49,6 +77,8 @@ const verifyEdocFiles = async (
 
   // Track validation status
   let isFileValid = container.signatures.length > 0;
+  let overallStatus: ValidationStatus = "VALID";
+  let allLimitations: { code: string }[] = [];
   let signerNames: string[] = [];
   let validationErrors: string[] = [];
 
@@ -57,6 +87,7 @@ const verifyEdocFiles = async (
     validationErrors.push("No signatures found in container");
     return {
       isValid: false,
+      status: "INVALID",
       signerNames,
       signingTime: "Unknown time",
       validationErrors,
@@ -120,9 +151,30 @@ const verifyEdocFiles = async (
         checkRevocation: false,
       });
 
+      // Track status from verification result
+      if (verificationResult.status !== "VALID") {
+        // Update overall status (worst case wins: INVALID > INDETERMINATE > UNSUPPORTED > VALID)
+        if (
+          verificationResult.status === "INVALID" ||
+          (verificationResult.status === "INDETERMINATE" && overallStatus !== "INVALID") ||
+          (verificationResult.status === "UNSUPPORTED" &&
+            overallStatus !== "INVALID" &&
+            overallStatus !== "INDETERMINATE")
+        ) {
+          overallStatus = verificationResult.status;
+        }
+      }
+
+      // Collect limitations
+      if (verificationResult.limitations) {
+        allLimitations.push(...verificationResult.limitations);
+      }
+
       if (!verificationResult.isValid) {
         isFileValid = false;
-        validationErrors.push(`Signature #${i + 1}: Signature verification failed`);
+        validationErrors.push(
+          `Signature #${i + 1}: Signature verification failed (${verificationResult.status})`,
+        );
 
         if (!verificationResult.certificate.isValid) {
           validationErrors.push(`Signature #${i + 1}: Certificate is invalid`);
@@ -142,6 +194,7 @@ const verifyEdocFiles = async (
       }
     } catch (error) {
       isFileValid = false;
+      overallStatus = "INVALID";
       validationErrors.push(
         `Signature #${i + 1}: Error during signature verification: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -154,6 +207,8 @@ const verifyEdocFiles = async (
 
   return {
     isValid: isFileValid,
+    status: overallStatus,
+    limitations: allLimitations.length > 0 ? allLimitations : undefined,
     signerNames,
     signingTime,
     validationErrors,
@@ -165,6 +220,7 @@ const describeSensitive = sensitiveSamplesDirExists ? describe : describe.skip;
 
 describeSensitive("Sensitive Samples Batch Verification", () => {
   const sensitiveFiles = collectFiles(sensitiveSamplesDir, [".edoc", ".asice"]);
+  const filelist = loadFilelist(sensitiveSamplesDir);
 
   it("should find the sensitive samples directory", () => {
     expect(sensitiveSamplesDirExists).toBe(true);
@@ -185,25 +241,42 @@ describeSensitive("Sensitive Samples Batch Verification", () => {
     sensitiveFiles.forEach((filePath) => {
       const filename = filePath.split("/").pop() || "";
 
-      it(`should validate sensitive file: ${filename}`, async () => {
+      // Find expected status from filelist (default to VALID if not specified)
+      const fileEntry = filelist?.find((f) => f.name === filename);
+      const expectedStatus = fileEntry?.expectedStatus || "VALID";
+      const expectedLimitation = fileEntry?.expectedLimitation;
+
+      it(`should validate sensitive file: ${filename} (expected: ${expectedStatus})`, async () => {
         try {
           const result = await verifyEdocFiles(filePath);
 
           // Log results concisely
           const signersList =
             result.signerNames.length > 0 ? result.signerNames.join(", ") : "Unknown signer(s)";
+          const statusIcon =
+            result.status === "VALID" ? "✓" : result.status === "INDETERMINATE" ? "?" : "✗";
           console.log(
-            `${filename}: ${result.isValid ? "✓ Valid" : "✗ Invalid"} - Signed at: ${result.signingTime} - By: ${signersList}`,
+            `${filename}: ${statusIcon} ${result.status} - Signed at: ${result.signingTime} - By: ${signersList}`,
           );
 
-          // Only log detailed errors if validation failed
-          if (!result.isValid) {
+          // Log limitations if present
+          if (result.limitations && result.limitations.length > 0) {
+            console.log(`  Limitations: ${result.limitations.map((l) => l.code).join(", ")}`);
+          }
+
+          // Only log detailed errors if unexpected status
+          if (result.status !== expectedStatus) {
             console.log(`  Validation errors in ${filename}:`);
             result.validationErrors.forEach((error) => console.log(`  - ${error}`));
           }
 
-          // Final assertion
-          expect(result.isValid).toBe(true);
+          // Assert expected status
+          expect(result.status).toBe(expectedStatus);
+
+          // Assert expected limitation if specified
+          if (expectedLimitation) {
+            expect(result.limitations?.some((l) => l.code === expectedLimitation)).toBe(true);
+          }
         } catch (error) {
           console.error(
             `Error processing ${filename}: ${error instanceof Error ? error.message : String(error)}`,
