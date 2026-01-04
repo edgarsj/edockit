@@ -36,7 +36,11 @@ export function extractCRLUrls(cert: X509Certificate): string[] {
           for (const gn of dpName.fullName) {
             // uniformResourceIdentifier is the URL
             if (gn.uniformResourceIdentifier) {
-              urls.push(gn.uniformResourceIdentifier);
+              const url = gn.uniformResourceIdentifier;
+              // Only include HTTP(S) URLs - skip LDAP and other protocols
+              if (url.startsWith("http://") || url.startsWith("https://")) {
+                urls.push(url);
+              }
             }
           }
         }

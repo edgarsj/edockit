@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Skip LDAP CRL distribution points** - Filter out non-HTTP(S) URLs from CRL distribution points to avoid failed fetch attempts on unsupported protocols like LDAP
+
 ## [0.3.0] - 2026-01-04
 
 ### Added
