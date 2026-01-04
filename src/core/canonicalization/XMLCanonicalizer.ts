@@ -29,26 +29,11 @@ const methods: Record<string, CanonMethod> = {
     isCanonicalizationMethod: "c14n",
   },
   c14n11: {
-    beforeChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => {
-      // If it's mixed content, don't add newlines
-      if (hasMixedContent) return "";
-      return hasElementChildren ? "\n" : "";
-    },
-    afterChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => {
-      // If it's mixed content, don't add newlines
-      if (hasMixedContent) return "";
-      return hasElementChildren ? "\n" : "";
-    },
-    betweenChildren: (
-      prevIsElement?: boolean,
-      nextIsElement?: boolean,
-      hasMixedContent?: boolean,
-    ) => {
-      // If it's mixed content, don't add newlines between elements
-      if (hasMixedContent) return "";
-      // Only add newline between elements
-      return prevIsElement && nextIsElement ? "\n" : "";
-    },
+    // C14N 1.1 should NOT add newlines - it should preserve original whitespace
+    // The difference from C14N is in xml:id normalization, not formatting
+    beforeChildren: () => "",
+    afterChildren: () => "",
+    betweenChildren: () => "",
     afterElement: () => "",
     isCanonicalizationMethod: "c14n11",
   },
