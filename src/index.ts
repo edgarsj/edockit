@@ -9,6 +9,20 @@ import { checkCertificateRevocation } from "./core/revocation/check";
 import { RevocationResult, RevocationCheckOptions } from "./core/revocation/types";
 import { parseTimestamp, verifyTimestamp, getTimestampTime } from "./core/timestamp/verify";
 import { TimestampInfo, TimestampVerificationResult } from "./core/timestamp/types";
+import {
+  DEFAULT_TRUSTED_LIST_SOURCES,
+  fetchTrustedListBundle,
+  getBundledTrustedList,
+  matchCertificateIssuerToTrustedList,
+  matchIssuerIdentityToTrustedList,
+  updateTrustedList,
+  TrustedListData,
+  TrustedListFetchOptions,
+  TrustedListSource,
+  TrustListMatch,
+  MatchCertificateIssuerToTrustedListOptions,
+  IssuerIdentity,
+} from "./core/trustedlist";
 
 export {
   // Core functionality
@@ -39,4 +53,18 @@ export {
   getTimestampTime,
   TimestampInfo,
   TimestampVerificationResult,
+
+  // Trusted list
+  DEFAULT_TRUSTED_LIST_SOURCES,
+  fetchTrustedListBundle,
+  getBundledTrustedList,
+  matchCertificateIssuerToTrustedList,
+  matchIssuerIdentityToTrustedList,
+  updateTrustedList,
+  TrustedListData,
+  TrustedListFetchOptions,
+  TrustedListSource,
+  TrustListMatch,
+  MatchCertificateIssuerToTrustedListOptions,
+  IssuerIdentity,
 };
