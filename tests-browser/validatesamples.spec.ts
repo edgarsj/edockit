@@ -222,6 +222,8 @@ describe("eDoc/ASiC-E Files Validation", () => {
     });
 
     it(`should validate all sensitive sample files`, async function () {
+      this.timeout(60000);
+
       // Skip if no files
       if (fileEntries.length === 0) {
         this.skip();

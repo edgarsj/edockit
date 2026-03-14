@@ -4,7 +4,20 @@ import {
   CANONICALIZATION_METHODS,
 } from "./core/canonicalization/XMLCanonicalizer";
 import { parseCertificate, getSignerDisplayName, formatValidityPeriod } from "./core/certificate";
-import { verifyChecksums, verifySignature } from "./core/verification";
+import {
+  verifyChecksums,
+  verifySignature,
+  VerificationOptions,
+  ChecksumVerificationResult,
+  SignatureVerificationResult,
+  CertificateVerificationResult,
+  ValidationStatus,
+  ValidationLimitation,
+  ChecklistStatus,
+  ChecklistCheck,
+  ChecklistItem,
+  VerificationResult,
+} from "./core/verification";
 import { checkCertificateRevocation } from "./core/revocation/check";
 import { RevocationResult, RevocationCheckOptions } from "./core/revocation/types";
 import { parseTimestamp, verifyTimestamp, getTimestampTime } from "./core/timestamp/verify";
@@ -41,6 +54,16 @@ export {
   // Verification
   verifyChecksums,
   verifySignature,
+  VerificationOptions,
+  ChecksumVerificationResult,
+  SignatureVerificationResult,
+  CertificateVerificationResult,
+  ValidationStatus,
+  ValidationLimitation,
+  ChecklistStatus,
+  ChecklistCheck,
+  ChecklistItem,
+  VerificationResult,
 
   // Revocation checking
   checkCertificateRevocation,

@@ -1,4 +1,4 @@
-import bundledTrustedListBundle from "../../data/trusted-list";
+import bundledTrustedListBundle from "../../data/trusted-list.js";
 import type {
   CompactTrustedListBundle,
   TrustedListData,
