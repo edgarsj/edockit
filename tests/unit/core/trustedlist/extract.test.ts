@@ -255,4 +255,56 @@ describe("trusted-list extraction", () => {
       },
     ]);
   });
+
+  it("preserves sibling SKI-only DigitalId evidence when subject and SKI are split", async () => {
+    const { skiBase64, skiHex, subjectDn } = await createCertificateData(
+      "CN=Split Identity CA,O=Example,C=LV",
+    );
+    const xml = `
+      <TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#">
+        <SchemeInformation>
+          <SchemeTerritory>LV</SchemeTerritory>
+        </SchemeInformation>
+        <TrustServiceProviderList>
+          <TrustServiceProvider>
+            <TSPInformation>
+              <TSPName>
+                <Name xml:lang="en">Split Identity TSP</Name>
+              </TSPName>
+            </TSPInformation>
+            <TSPServices>
+              <TSPService>
+                <ServiceInformation>
+                  <ServiceTypeIdentifier>http://uri.etsi.org/TrstSvc/Svctype/CA/QC</ServiceTypeIdentifier>
+                  <ServiceDigitalIdentity>
+                    <DigitalId>
+                      <X509SubjectName>${subjectDn.replace(/,/g, ", ")}</X509SubjectName>
+                    </DigitalId>
+                    <DigitalId>
+                      <X509SKI>${skiBase64}</X509SKI>
+                    </DigitalId>
+                  </ServiceDigitalIdentity>
+                  <ServiceStatus>http://uri.etsi.org/TrstSvc/TrustedList/Svcstatus/granted</ServiceStatus>
+                  <StatusStartingTime>2024-01-01T00:00:00Z</StatusStartingTime>
+                </ServiceInformation>
+              </TSPService>
+            </TSPServices>
+          </TrustServiceProvider>
+        </TrustServiceProviderList>
+      </TrustServiceStatusList>
+    `;
+
+    const services = await parseTrustedList(xml, { source: SOURCE });
+
+    expect(services).toHaveLength(1);
+    expect(services[0].subjectDn).toBe(subjectDn);
+    expect(services[0].skiHex).toBe(skiHex);
+    expect(services[0].history).toEqual([
+      {
+        status: "granted",
+        from: "2024-01-01T00:00:00Z",
+        to: null,
+      },
+    ]);
+  });
 });

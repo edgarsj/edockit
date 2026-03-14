@@ -69,6 +69,9 @@ function buildTrustMatch(
   }
 
   if (confidence === "dn_only" && !allowWeakDnOnlyMatch) {
+    // DN-only matches are intentionally left indeterminate: the name match is too weak to
+    // make either a positive or negative trust assertion, even if the matched service history
+    // happens to contain an active withdrawn/deprecated status at the signing time.
     return {
       found: true,
       confidence,

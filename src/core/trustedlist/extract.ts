@@ -38,6 +38,12 @@ interface SnapshotIdentityGroup {
   snapshots: TrustedServiceSnapshot[];
 }
 
+interface ParsedDigitalIdentity {
+  subjectDn: string;
+  skiHex: string | null;
+  spkiSha256Hex: string;
+}
+
 function getPreferredName(parent: Element | null): string | undefined {
   if (!parent) {
     return undefined;
@@ -74,7 +80,7 @@ async function parseDigitalIdentity(
     status: string;
     startTime: string;
   },
-): Promise<TrustedServiceSnapshot | null> {
+): Promise<ParsedDigitalIdentity | null> {
   const certificateValue = getDescendantText(digitalIdentityElement, "X509Certificate");
   const subjectDnFromTsl = normalizeDistinguishedName(
     getDescendantText(digitalIdentityElement, "X509SubjectName") || null,
@@ -103,22 +109,67 @@ async function parseDigitalIdentity(
   }
 
   const subjectDn = subjectDnFromCertificate || subjectDnFromTsl;
-  if (!subjectDn) {
+  const skiHex = skiFromCertificate || skiFromTsl;
+
+  if (!subjectDn && !skiHex && !spkiSha256Hex) {
     return null;
   }
 
   return {
-    skiHex: skiFromCertificate || skiFromTsl,
-    spkiSha256Hex,
     subjectDn,
-    country: context.country,
-    tspName: context.tspName,
-    serviceType: context.serviceType,
-    source: context.source.id,
-    sourceLabel: context.source.label,
-    status: context.status,
-    startTime: context.startTime,
+    skiHex,
+    spkiSha256Hex,
   };
+}
+
+function buildSnapshotsFromDigitalIdentities(
+  identities: ParsedDigitalIdentity[],
+  context: {
+    country: string;
+    source: TrustedListSource;
+    serviceType: string;
+    tspName: string;
+    status: string;
+    startTime: string;
+  },
+): TrustedServiceSnapshot[] {
+  const identitiesWithSubject = identities.filter((identity) => identity.subjectDn);
+  if (identitiesWithSubject.length === 0) {
+    return [];
+  }
+
+  const identitiesWithoutSubject = identities.filter(
+    (identity) => !identity.subjectDn && (identity.skiHex || identity.spkiSha256Hex),
+  );
+  const attachAnonymousIdentityEvidence =
+    identitiesWithSubject.length === 1 && identitiesWithoutSubject.length > 0;
+
+  return identitiesWithSubject.map((identity, index) => {
+    const mergedIdentity =
+      attachAnonymousIdentityEvidence && index === 0
+        ? identitiesWithoutSubject.reduce(
+            (current, anonymousIdentity) => ({
+              ...current,
+              skiHex: current.skiHex || anonymousIdentity.skiHex,
+              spkiSha256Hex: current.spkiSha256Hex || anonymousIdentity.spkiSha256Hex,
+            }),
+            identity,
+          )
+        : identity;
+
+    return {
+      skiHex: mergedIdentity.skiHex,
+      spkiSha256Hex: mergedIdentity.spkiSha256Hex,
+      subjectDn: mergedIdentity.subjectDn,
+      country: context.country,
+      tspName: context.tspName,
+      serviceType: context.serviceType,
+      source: context.source.id,
+      sourceLabel: context.source.label,
+      status: context.status,
+      startTime: context.startTime,
+    };
+  });
 }
 
 function mergeSnapshotIntoGroup(
@@ -286,20 +337,31 @@ async function extractServiceSnapshots(
     const serviceDigitalIdentity = getChildElement(container, "ServiceDigitalIdentity");
     const digitalIdentities = getChildElements(serviceDigitalIdentity, "DigitalId");
 
-    for (const digitalIdentity of digitalIdentities) {
-      const snapshot = await parseDigitalIdentity(digitalIdentity, {
+    const digitalIdentitySnapshots = (
+      await Promise.all(
+        digitalIdentities.map((digitalIdentity) =>
+          parseDigitalIdentity(digitalIdentity, {
+            country: context.country,
+            source: context.source,
+            serviceType,
+            tspName: context.tspName,
+            status,
+            startTime,
+          }),
+        ),
+      )
+    ).filter((snapshot): snapshot is ParsedDigitalIdentity => Boolean(snapshot));
+
+    snapshots.push(
+      ...buildSnapshotsFromDigitalIdentities(digitalIdentitySnapshots, {
         country: context.country,
         source: context.source,
         serviceType,
         tspName: context.tspName,
         status,
         startTime,
-      });
-
-      if (snapshot) {
-        snapshots.push(snapshot);
-      }
-    }
+      }),
+    );
   }
 
   return snapshots;

@@ -32,8 +32,10 @@ import {
   TrustedListData,
   TrustedListFetchOptions,
   TrustedListSource,
+  TrustMatchConfidence,
   TrustListMatch,
   MatchCertificateIssuerToTrustedListOptions,
+  MatchIssuerOptions,
   IssuerIdentity,
 } from "./core/trustedlist";
 
@@ -87,7 +89,9 @@ export {
   TrustedListData,
   TrustedListFetchOptions,
   TrustedListSource,
+  TrustMatchConfidence,
   TrustListMatch,
   MatchCertificateIssuerToTrustedListOptions,
+  MatchIssuerOptions,
   IssuerIdentity,
 };

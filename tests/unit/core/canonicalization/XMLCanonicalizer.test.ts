@@ -18,6 +18,18 @@ describe("XMLCanonicalizer", () => {
     expect(canonicalizer).toBeInstanceOf(XMLCanonicalizer);
   });
 
+  it("should accept with-comments canonicalization URIs", () => {
+    expect(() =>
+      XMLCanonicalizer.fromMethod("http://www.w3.org/2001/10/xml-exc-c14n#WithComments"),
+    ).not.toThrow();
+    expect(() =>
+      XMLCanonicalizer.fromMethod("http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments"),
+    ).not.toThrow();
+    expect(() =>
+      XMLCanonicalizer.fromMethod("http://www.w3.org/2006/12/xml-c14n11#WithComments"),
+    ).not.toThrow();
+  });
+
   it("should honor exclusive canonicalization when using a method-specific instance", () => {
     const xml =
       '<asic:XAdESSignatures xmlns:asic="http://uri.etsi.org/02918/v1.2.1#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignatureValue Id="sig-value">abc</ds:SignatureValue></asic:XAdESSignatures>';

@@ -94,6 +94,12 @@ async function parseTrustedListWithWarnings(
   }
 }
 
+/**
+ * Low-level live fetch helper for LOTL/TSL processing.
+ *
+ * Primarily intended for Node.js build/update tooling. Browser callers generally
+ * need a proxy and should prefer the higher-level trusted-list update flow.
+ */
 export async function fetchTrustedListBundle(
   sources: TrustedListSource[] = DEFAULT_TRUSTED_LIST_SOURCES,
   fetchOptions: TrustedListFetchOptions = {},

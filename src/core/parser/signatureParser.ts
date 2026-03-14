@@ -35,6 +35,20 @@ function parseInclusiveNamespacesPrefixList(
   return prefixes.length > 0 ? prefixes : undefined;
 }
 
+function createTimestampCanonicalizer(canonicalizationMethod?: string): XMLCanonicalizer {
+  if (!canonicalizationMethod) {
+    return new XMLCanonicalizer();
+  }
+
+  try {
+    return XMLCanonicalizer.fromMethod(canonicalizationMethod);
+  } catch {
+    // Fall back to default canonicalization so timestamp binding is still attempted
+    // instead of being skipped entirely for unsupported URI variants.
+    return new XMLCanonicalizer();
+  }
+}
+
 /**
  * Find signature files in the eDoc container
  * @param files Map of filenames to file contents
@@ -204,9 +218,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   let canonicalSignatureValue: string | undefined;
   if (signatureValueEl) {
     try {
-      const canonicalizer = signatureTimestampCanonicalizationMethod
-        ? XMLCanonicalizer.fromMethod(signatureTimestampCanonicalizationMethod)
-        : new XMLCanonicalizer();
+      const canonicalizer = createTimestampCanonicalizer(signatureTimestampCanonicalizationMethod);
       canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl, new Map(), {
         inclusiveNamespacePrefixList: signatureTimestampInclusiveNamespacePrefixList,
       });

@@ -85,7 +85,6 @@ export function createEmptyTrustedListBundle(): CompactTrustedListBundle {
 }
 
 export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedListData {
-  const sourceMap = new Map<number, TrustedListSource>();
   const services: TrustedService[] = bundle.services.map((serviceRecord) => {
     const [
       skiHex,
@@ -103,14 +102,7 @@ export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedL
       throw new Error(`Trusted list bundle contains unknown source code ${sourceCode}`);
     }
 
-    const [sourceId, sourceLabel, lotlUrl] = sourceTuple;
-    if (!sourceMap.has(sourceCode)) {
-      sourceMap.set(sourceCode, {
-        id: sourceId,
-        label: sourceLabel,
-        lotlUrl,
-      });
-    }
+    const [sourceId, sourceLabel] = sourceTuple;
 
     const subjectDn = bundle.strings[subjectDnIdx];
     const tspName = bundle.strings[tspNameIdx];

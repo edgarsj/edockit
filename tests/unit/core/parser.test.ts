@@ -229,4 +229,38 @@ describe("Signature Parser", () => {
       { inclusiveNamespacePrefixList: ["asic", "xades"] },
     );
   });
+
+  it("falls back to the default canonicalizer when timestamp c14n URI is unsupported", () => {
+    (__mockFromMethod as jest.Mock).mockImplementation(() => {
+      throw new Error("unsupported");
+    });
+
+    const mockSignatureElement = {
+      nodeName: "ds:Signature",
+      getAttribute: jest.fn().mockReturnValue("test-sig-id"),
+      ownerDocument: {
+        createNodeIterator: jest.fn(),
+        evaluate: jest.fn(),
+      },
+    };
+
+    const mockDocument = {
+      documentElement: {
+        nodeName: "root",
+      },
+      createNodeIterator: jest.fn(),
+      evaluate: jest.fn(),
+    };
+
+    const result = parseSignatureElement(
+      mockSignatureElement as unknown as Element,
+      mockDocument as unknown as Document,
+    );
+
+    expect(result.canonicalSignatureValue).toBe(
+      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
+    );
+    expect(__mockFromMethod).toHaveBeenCalledWith("http://www.w3.org/2001/10/xml-exc-c14n#");
+    expect(__mockCanonicalize).toHaveBeenCalled();
+  });
 });
