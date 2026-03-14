@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Verification checklist output** - `verifySignature()` can now return a structured `checklist` with per-check status details when `includeChecklist: true`
+- **Trusted-list issuer validation** - `verifySignature()` can now return `trustListMatch` and evaluate `issuer_trusted_at_signing_time` when `checkTrustedList: true`
+- **Trusted-list helper APIs** - Added bundled trusted-list utilities including `getBundledTrustedList()`, `updateTrustedList()`, and `matchCertificateIssuerToTrustedList()`
+- **Node-only trusted-list builder** - Added the trusted-list bundle builder and `npm run update-trusted-list`
+
 ### Fixed
 
+- **SignatureTimeStamp canonicalization** - Respect the timestamp's declared canonicalization method when hashing `ds:SignatureValue`, fixing false `coversSignature: false` results for some real samples
 - **Skip LDAP CRL distribution points** - Filter out non-HTTP(S) URLs from CRL distribution points to avoid failed fetch attempts on unsupported protocols like LDAP
 
 ## [0.3.0] - 2026-01-04

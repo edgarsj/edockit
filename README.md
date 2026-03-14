@@ -11,11 +11,7 @@ This library supports standard European ASiC-E (.asice, .sce) containers as defi
 ## Installation
 
 ```bash
-# Install the core library
 npm install edockit
-
-# If using in Node.js environment, also install xmldom
-npm install @xmldom/xmldom
 ```
 
 ## Usage
@@ -23,7 +19,7 @@ npm install @xmldom/xmldom
 ### Basic Usage
 
 ```typescript
-import { parseEdoc, verifySignature } from 'edockit';
+import { parseEdoc, verifySignature } from "edockit";
 
 // Parse an ASiC-E/eDoc file
 const fileBuffer = /* your file buffer */;
@@ -42,12 +38,17 @@ console.log(Array.from(container.files.keys()));
 // Verify a signature (with revocation and timestamp checking)
 const result = await verifySignature(container.signatures[0], container.files, {
   checkRevocation: true,   // OCSP/CRL checking (default: true)
+  verifyTimestamps: true,  // RFC 3161 timestamp verification (default: true)
+  includeChecklist: true,  // Add a structured verification checklist (default: false)
+  checkTrustedList: true,  // Match signer issuer against bundled trusted-list data (default: false)
   revocationOptions: {     // Optional: configure revocation check behavior
     ocspTimeout: 5000,     // OCSP request timeout in ms (default: 5000)
     crlTimeout: 10000,     // CRL fetch timeout in ms (default: 10000)
-    proxyUrl: 'https://cors-proxy.example.com/?url=',  // CORS proxy for browser (optional)
+    proxyUrl: "https://cors-proxy.example.com/?url=",  // CORS proxy for browser (optional)
   },
-  verifyTimestamps: true,  // RFC 3161 timestamp verification (default: true)
+  trustedListFetchOptions: {
+    proxyUrl: "https://cors-proxy.example.com/?url=",  // Optional: helps with issuer-cert fetches in browsers
+  },
   verifyTime: new Date()   // Verify certificate at specific time (default: timestamp time if present, otherwise now)
 });
 // result = {
@@ -76,10 +77,58 @@ const result = await verifySignature(container.signatures[0], container.files, {
 //     coversSignature: boolean,
 //     tsaRevocation: { status, method, ... }
 //   },
+//   checklist: [{
+//     check: 'document_integrity' | 'signature_valid' | 'certificate_valid_at_signing_time' |
+//            'timestamp_present' | 'timestamp_valid' | 'certificate_not_revoked_at_signing_time' |
+//            'issuer_trusted_at_signing_time',
+//     label: string,
+//     status: 'pass' | 'fail' | 'skipped' | 'indeterminate',
+//     detail?: string,
+//     country?: string
+//   }],
+//   trustListMatch: {
+//     found: boolean,
+//     trustedAtSigningTime?: boolean,
+//     confidence?: 'exact' | 'aki_dn' | 'dn_only',
+//     country?: string,
+//     tspName?: string,
+//     serviceType?: string,
+//     source?: string,
+//     sourceLabel?: string,
+//     detail?: string
+//   },
 //   errors: string[]                 // Any validation errors (if present)
 // }
-console.log(`Signature valid: ${result.isValid}`);
+console.log(`Status: ${result.status}`);
+console.log(result.checklist?.find((item) => item.check === "issuer_trusted_at_signing_time"));
 ```
+
+### Verification Checklist and Trusted List
+
+`verifySignature()` can optionally return a checklist of the main verification decisions and a
+trusted-list match for the signer issuer.
+
+```typescript
+const result = await verifySignature(container.signatures[0], container.files, {
+  includeChecklist: true,
+  checkTrustedList: true,
+});
+
+for (const item of result.checklist || []) {
+  console.log(`${item.check}: ${item.status}${item.detail ? ` - ${item.detail}` : ""}`);
+}
+
+if (result.trustListMatch?.found) {
+  console.log(result.trustListMatch.detail);
+}
+```
+
+Notes:
+
+- Checklist statuses are `pass`, `fail`, `skipped`, and `indeterminate`
+- `checkTrustedList: true` uses the bundled trusted-list snapshot by default
+- Pass `trustedListData` if you already have a fresher preloaded snapshot
+- `allowWeakDnOnlyTrustMatch` is off by default, so DN-only matches stay `indeterminate`
 
 ### Node.js Example
 
@@ -95,7 +144,9 @@ const container = parseEdoc(fileBuffer);
 for (const signature of container.signatures) {
   const result = await verifySignature(signature, container.files, {
     checkRevocation: true,
-    verifyTimestamps: true
+    verifyTimestamps: true,
+    includeChecklist: true,
+    checkTrustedList: true,
   });
 
   // Use granular status for detailed handling
@@ -116,6 +167,13 @@ for (const signature of container.signatures) {
 
   if (result.timestamp?.info) {
     console.log(`Signed at (TSA): ${result.timestamp.info.genTime}`);
+  }
+
+  const trustItem = result.checklist?.find(
+    (item) => item.check === "issuer_trusted_at_signing_time",
+  );
+  if (trustItem) {
+    console.log(`Trusted issuer at signing time: ${trustItem.status}`);
   }
 
   if (result.certificate.revocation) {
@@ -140,16 +198,22 @@ async function verifyDocument(url) {
   for (const signature of container.signatures) {
     const result = await verifySignature(signature, container.files, {
       checkRevocation: true,
+      includeChecklist: true,
+      checkTrustedList: true,
       revocationOptions: {
         // Use a CORS proxy for OCSP/CRL requests in browser environments
-        proxyUrl: 'https://your-cors-proxy.example.com/?url=',
+        proxyUrl: "https://your-cors-proxy.example.com/?url=",
+      },
+      trustedListFetchOptions: {
+        // Optional: use a proxy if issuer certificates need to be fetched for stronger matches
+        proxyUrl: "https://your-cors-proxy.example.com/?url=",
       },
     });
 
     // Handle different validation states
-    if (result.status === 'VALID') {
-      console.log('Signature verified successfully');
-    } else if (result.status === 'UNSUPPORTED') {
+    if (result.status === "VALID") {
+      console.log("Signature verified successfully");
+    } else if (result.status === "UNSUPPORTED") {
       // Some signatures can't be verified in certain browsers (e.g., RSA >4096 in Safari)
       console.log(`Browser limitation: ${result.statusMessage}`);
     } else {
@@ -165,12 +229,14 @@ async function verifyDocument(url) {
 
 > **Note:** OCSP and CRL endpoints typically don't support CORS, so browser environments need a proxy to perform revocation checks. The `proxyUrl` option routes all revocation requests through the specified proxy, which should accept the original URL as a query parameter.
 
+> **Note:** Trusted-list matching uses bundled trusted-list data by default. In some cases the library may try to fetch issuer certificates to upgrade a match from `aki_dn` to `exact`; `trustedListFetchOptions.proxyUrl` helps with that in browsers.
+
 ### Timestamp Utilities
 
 For advanced timestamp handling, you can use the timestamp utilities directly:
 
 ```typescript
-import { parseTimestamp, verifyTimestamp, getTimestampTime } from 'edockit';
+import { parseTimestamp, verifyTimestamp, getTimestampTime } from "edockit";
 
 // Get timestamp time from a signature (quick utility)
 const timestampTime = getTimestampTime(signature.signatureTimestamp);
@@ -189,11 +255,35 @@ const info = parseTimestamp(signature.signatureTimestamp);
 
 // Verify timestamp with options
 const result = await verifyTimestamp(signature.signatureTimestamp, {
-  signatureValue: signature.signatureValue,  // Verify timestamp covers this signature
-  verifyTsaCertificate: true,                // Check TSA cert validity
-  checkTsaRevocation: true,                  // Check TSA cert revocation
+  canonicalSignatureValue: signature.canonicalSignatureValue,  // Verify timestamp covers the canonicalized ds:SignatureValue element
+  verifyTsaCertificate: true,                                // Check TSA cert validity
+  checkTsaRevocation: true,                                  // Check TSA cert revocation
 });
 ```
+
+### Trusted List Utilities
+
+If you need direct access to trusted-list data, the library also exports helpers:
+
+```typescript
+import {
+  getBundledTrustedList,
+  matchCertificateIssuerToTrustedList,
+  updateTrustedList,
+} from "edockit";
+
+const bundled = getBundledTrustedList();
+
+const refreshed = await updateTrustedList();
+
+const match = await matchCertificateIssuerToTrustedList(signature.certificatePEM, {
+  certificateChain: signature.certificateChain,
+  trustedListData: bundled,
+  signingTime: signature.signingTime,
+});
+```
+
+`updateTrustedList()` also accepts custom LOTL sources and fetch options when you need them.
 
 ## Features
 
@@ -204,6 +294,9 @@ const result = await verifyTimestamp(signature.signatureTimestamp, {
 - Validate certificate validity (time-based)
 - RFC 3161 timestamp verification (when present, certificate is validated at the trusted TSA timestamp time)
 - OCSP/CRL revocation checking for both signer and TSA certificates (soft-fail behavior - network errors don't invalidate signatures)
+- Structured verification checklist for consumer applications
+- Trusted-list issuer matching at signing time using bundled trusted-list data
+- Bundled trusted-list helpers for matching and runtime updates
 
 ## Testing Status
 
