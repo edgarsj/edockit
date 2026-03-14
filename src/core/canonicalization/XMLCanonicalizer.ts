@@ -58,6 +58,11 @@ interface ExcC14NOptions {
   isStartingNode?: boolean;
 }
 
+interface CanonicalizeOptions {
+  inclusiveNamespacePrefixList?: string[];
+  isStartingNode?: boolean;
+}
+
 // Whitespace information to track
 interface WhitespaceInfo {
   hasMixedContent?: boolean; // Whether element has both elements and text
@@ -288,8 +293,25 @@ class XMLCanonicalizer {
     analyzeNode(rootNode as NodeWithWhitespace);
   }
 
-  // Standard canonicalization method
   canonicalize(
+    node: NodeWithWhitespace,
+    visibleNamespaces = new Map<string, string>(),
+    options: CanonicalizeOptions = { isStartingNode: true },
+  ): string {
+    if (this.method.isCanonicalizationMethod === "c14n_exc") {
+      return this.canonicalizeExclusive(node, visibleNamespaces, {
+        inclusiveNamespacePrefixList: options.inclusiveNamespacePrefixList,
+        isStartingNode: options.isStartingNode,
+      });
+    }
+
+    return this.canonicalizeStandard(node, visibleNamespaces, {
+      isStartingNode: options.isStartingNode ?? true,
+    });
+  }
+
+  // Standard canonicalization method
+  private canonicalizeStandard(
     node: NodeWithWhitespace,
     visibleNamespaces = new Map<string, string>(),
     options = { isStartingNode: true },
@@ -453,7 +475,7 @@ class XMLCanonicalizer {
           }
 
           // Recursively canonicalize the child element
-          result += this.canonicalize(child, elementVisibleNamespaces, {
+          result += this.canonicalizeStandard(child, elementVisibleNamespaces, {
             isStartingNode: false,
           });
 

@@ -152,11 +152,37 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   const signatureValueEl = querySelector(signatureElement, "ds\\:SignatureValue, SignatureValue");
   const signatureValue = signatureValueEl?.textContent?.replace(/\s+/g, "") || "";
 
+  // Extract signature timestamp (RFC 3161) and its canonicalization method
+  let signatureTimestamp: string | undefined;
+  let signatureTimestampCanonicalizationMethod: string | undefined;
+  const signatureTimestampElement = querySelector(
+    xmlDoc,
+    "xades\\:SignatureTimeStamp, SignatureTimeStamp",
+  );
+  if (signatureTimestampElement) {
+    const timestampC14nMethodEl = querySelector(
+      signatureTimestampElement,
+      "ds\\:CanonicalizationMethod, CanonicalizationMethod",
+    );
+    signatureTimestampCanonicalizationMethod =
+      timestampC14nMethodEl?.getAttribute("Algorithm") || undefined;
+
+    const timestampElement = querySelector(
+      signatureTimestampElement,
+      "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
+    );
+    if (timestampElement && timestampElement.textContent) {
+      signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
+    }
+  }
+
   // Compute canonicalized SignatureValue element for timestamp verification
   let canonicalSignatureValue: string | undefined;
   if (signatureValueEl) {
     try {
-      const canonicalizer = new XMLCanonicalizer();
+      const canonicalizer = signatureTimestampCanonicalizationMethod
+        ? XMLCanonicalizer.fromMethod(signatureTimestampCanonicalizationMethod)
+        : new XMLCanonicalizer();
       canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl);
     } catch {
       // Canonicalization failed - leave undefined
@@ -292,16 +318,6 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     if (digestValueEl && digestValueEl.textContent) {
       signedChecksums[cleanUri] = digestValueEl.textContent.replace(/\s+/g, "");
     }
-  }
-
-  // Extract signature timestamp (RFC 3161) from xades:SignatureTimeStamp
-  let signatureTimestamp: string | undefined;
-  const timestampElement = querySelector(
-    xmlDoc,
-    "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
-  );
-  if (timestampElement && timestampElement.textContent) {
-    signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
   }
 
   return {

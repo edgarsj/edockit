@@ -65,7 +65,7 @@ const PUBLIC_SAMPLE_CHECKLIST_EXPECTATIONS: Record<string, PublicSampleChecklist
       signature_valid: "pass",
       certificate_valid_at_signing_time: "pass",
       timestamp_present: "pass",
-      timestamp_valid: "fail",
+      timestamp_valid: "pass",
       certificate_not_revoked_at_signing_time: "skipped",
       issuer_trusted_at_signing_time: "pass",
     },
