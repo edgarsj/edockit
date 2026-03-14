@@ -233,6 +233,21 @@ describe("Signature Verification", () => {
     });
   });
 
+  it("marks document integrity as skipped when checksum verification is disabled", async () => {
+    const result = await verifySignature(createSignatureInfo(), new Map(), {
+      includeChecklist: true,
+      verifyChecksums: false,
+      verifySignatures: false,
+      checkRevocation: false,
+    });
+
+    expect(result.isValid).toBe(true);
+    expect(getChecklistItem(result, "document_integrity")).toMatchObject({
+      status: "skipped",
+      detail: "Checksum verification not enabled",
+    });
+  });
+
   it("treats revocation after signing time as a checklist pass", async () => {
     mockCheckCertificateRevocation.mockResolvedValue({
       isValid: false,

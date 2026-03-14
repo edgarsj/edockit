@@ -14,6 +14,27 @@ import { extractSignerInfo } from "../certificate";
 import { SignatureInfo } from "./types";
 import { formatPEM } from "./certificateUtils";
 
+function parseInclusiveNamespacesPrefixList(
+  canonicalizationMethodElement: Element | null,
+): string[] | undefined {
+  if (!canonicalizationMethodElement) {
+    return undefined;
+  }
+
+  const inclusiveNamespacesElement = querySelector(
+    canonicalizationMethodElement,
+    "ec\\:InclusiveNamespaces, InclusiveNamespaces",
+  );
+  const prefixList = inclusiveNamespacesElement?.getAttribute("PrefixList")?.trim();
+
+  if (!prefixList) {
+    return undefined;
+  }
+
+  const prefixes = prefixList.split(/\s+/).filter(Boolean);
+  return prefixes.length > 0 ? prefixes : undefined;
+}
+
 /**
  * Find signature files in the eDoc container
  * @param files Map of filenames to file contents
@@ -155,6 +176,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   // Extract signature timestamp (RFC 3161) and its canonicalization method
   let signatureTimestamp: string | undefined;
   let signatureTimestampCanonicalizationMethod: string | undefined;
+  let signatureTimestampInclusiveNamespacePrefixList: string[] | undefined;
   const signatureTimestampElement = querySelector(
     xmlDoc,
     "xades\\:SignatureTimeStamp, SignatureTimeStamp",
@@ -166,6 +188,8 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     );
     signatureTimestampCanonicalizationMethod =
       timestampC14nMethodEl?.getAttribute("Algorithm") || undefined;
+    signatureTimestampInclusiveNamespacePrefixList =
+      parseInclusiveNamespacesPrefixList(timestampC14nMethodEl);
 
     const timestampElement = querySelector(
       signatureTimestampElement,
@@ -183,7 +207,9 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
       const canonicalizer = signatureTimestampCanonicalizationMethod
         ? XMLCanonicalizer.fromMethod(signatureTimestampCanonicalizationMethod)
         : new XMLCanonicalizer();
-      canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl);
+      canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl, new Map(), {
+        inclusiveNamespacePrefixList: signatureTimestampInclusiveNamespacePrefixList,
+      });
     } catch {
       // Canonicalization failed - leave undefined
     }

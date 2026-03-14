@@ -198,14 +198,25 @@ function buildVerificationChecklist({
 }): ChecklistItem[] {
   const checklist: ChecklistItem[] = [];
 
-  checklist.push(
-    createChecklistItem(
-      "document_integrity",
-      "Document integrity",
-      checksumResult.isValid ? "pass" : "fail",
-      checksumResult.isValid ? undefined : getFailedChecksumDetail(checksumResult),
-    ),
-  );
+  if (options.verifyChecksums === false) {
+    checklist.push(
+      createChecklistItem(
+        "document_integrity",
+        "Document integrity",
+        "skipped",
+        "Checksum verification not enabled",
+      ),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "document_integrity",
+        "Document integrity",
+        checksumResult.isValid ? "pass" : "fail",
+        checksumResult.isValid ? undefined : getFailedChecksumDetail(checksumResult),
+      ),
+    );
+  }
 
   if (options.verifySignatures === false) {
     checklist.push(

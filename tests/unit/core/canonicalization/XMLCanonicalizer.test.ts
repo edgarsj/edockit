@@ -34,6 +34,24 @@ describe("XMLCanonicalizer", () => {
     );
   });
 
+  it("should include requested InclusiveNamespaces prefixes for exclusive canonicalization", () => {
+    const xml =
+      '<asic:XAdESSignatures xmlns:asic="http://uri.etsi.org/02918/v1.2.1#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignatureValue Id="sig-value">abc</ds:SignatureValue></asic:XAdESSignatures>';
+    const doc = createXMLParser().parseFromString(xml, "text/xml");
+    const signatureValue = querySelector(doc, "ds\\:SignatureValue, SignatureValue");
+
+    expect(signatureValue).toBeTruthy();
+    expect(
+      XMLCanonicalizer.fromMethod("http://www.w3.org/2001/10/xml-exc-c14n#").canonicalize(
+        signatureValue as any,
+        new Map(),
+        { inclusiveNamespacePrefixList: ["asic"] },
+      ),
+    ).toBe(
+      '<ds:SignatureValue xmlns:asic="http://uri.etsi.org/02918/v1.2.1#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="sig-value">abc</ds:SignatureValue>',
+    );
+  });
+
   it("should throw error for unsupported method URI", () => {
     const uri = "http://unsupported-method";
     expect(() => XMLCanonicalizer.fromMethod(uri)).toThrow();

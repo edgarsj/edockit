@@ -1,7 +1,6 @@
 // tests/unit/core/parser.test.ts
 import { __test__ } from "../../../src/core/parser/signatureParser";
 import { querySelector, querySelectorAll } from "../../../src/utils/xmlParser";
-import { CANONICALIZATION_METHODS } from "../../../src/core/canonicalization/XMLCanonicalizer";
 
 const { parseSignatureElement } = __test__;
 
@@ -49,11 +48,25 @@ jest.mock("@peculiar/x509", () => ({
 }));
 
 // Mock canonicalization methods
-jest.mock("../../../src/core/canonicalization/XMLCanonicalizer", () => ({
-  CANONICALIZATION_METHODS: {
-    default: "http://www.w3.org/2001/10/xml-exc-c14n#",
-  },
-}));
+jest.mock("../../../src/core/canonicalization/XMLCanonicalizer", () => {
+  const mockCanonicalize = jest
+    .fn()
+    .mockReturnValue("<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>");
+  const mockFromMethod = jest.fn();
+
+  return {
+    __mockCanonicalize: mockCanonicalize,
+    __mockFromMethod: mockFromMethod,
+    XMLCanonicalizer: class MockXMLCanonicalizer {
+      canonicalize = mockCanonicalize;
+
+      static fromMethod = mockFromMethod;
+    },
+    CANONICALIZATION_METHODS: {
+      default: "http://www.w3.org/2001/10/xml-exc-c14n#",
+    },
+  };
+});
 
 // Mock the XMLParser utilities
 jest.mock("../../../src/utils/xmlParser", () => ({
@@ -63,12 +76,27 @@ jest.mock("../../../src/utils/xmlParser", () => ({
   serializeToXML: jest.fn().mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
 }));
 
+const { __mockCanonicalize, __mockFromMethod } =
+  require("../../../src/core/canonicalization/XMLCanonicalizer") as {
+    __mockCanonicalize: jest.Mock;
+    __mockFromMethod: jest.Mock;
+  };
+
 describe("Signature Parser", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (__mockCanonicalize as jest.Mock).mockReturnValue(
+      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
+    );
+    (__mockFromMethod as jest.Mock).mockReturnValue({
+      canonicalize: __mockCanonicalize,
+    });
 
     // Create a map of selector patterns to responses
     const mockResponses = {
+      SignatureTimeStamp: {
+        nodeName: "xades:SignatureTimeStamp",
+      },
       SignedInfo: {
         nodeName: "ds:SignedInfo",
       },
@@ -80,6 +108,9 @@ describe("Signature Parser", () => {
       },
       SignatureValue: {
         textContent: "MockSignatureValueBase64==",
+      },
+      InclusiveNamespaces: {
+        getAttribute: (attr: string) => (attr === "PrefixList" ? "asic xades" : null),
       },
       X509Certificate: {
         textContent: "MockCertificateBase64==",
@@ -178,6 +209,9 @@ describe("Signature Parser", () => {
     expect(result.certificate).toBe("MockCertificateBase64==");
     expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
     expect(result.signatureValue).toBe("MockSignatureValueBase64==");
+    expect(result.canonicalSignatureValue).toBe(
+      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
+    );
     expect(result.algorithm).toBe("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
     expect(result.signedInfoXml).toBe("<ds:SignedInfo>mocked xml</ds:SignedInfo>");
     // Verify references array
@@ -188,5 +222,11 @@ describe("Signature Parser", () => {
 
     // Verify that querySelector was called with the right parameters
     expect(querySelector).toHaveBeenCalledWith(mockSignatureElement, "ds\\:SignedInfo, SignedInfo");
+    expect(__mockFromMethod).toHaveBeenCalledWith("http://www.w3.org/2001/10/xml-exc-c14n#");
+    expect(__mockCanonicalize).toHaveBeenCalledWith(
+      expect.objectContaining({ textContent: "MockSignatureValueBase64==" }),
+      expect.any(Map),
+      { inclusiveNamespacePrefixList: ["asic", "xades"] },
+    );
   });
 });

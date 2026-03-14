@@ -35,19 +35,25 @@ function getChildNodes(parent: XmlParent): Node[] {
   return nodes;
 }
 
-function walkDescendants(parent: XmlParent, callback: (element: Element) => void) {
-  const visit = (node: Node) => {
+function walkDescendants(parent: XmlParent, callback: (element: Element) => boolean | void) {
+  const visit = (node: Node): boolean => {
     if (isElement(node)) {
-      callback(node);
+      if (callback(node)) {
+        return true;
+      }
     }
 
     if (!node.childNodes) {
-      return;
+      return false;
     }
 
     for (let index = 0; index < node.childNodes.length; index += 1) {
-      visit(node.childNodes[index]);
+      if (visit(node.childNodes[index])) {
+        return true;
+      }
     }
+
+    return false;
   };
 
   const startingNodes =
@@ -56,7 +62,9 @@ function walkDescendants(parent: XmlParent, callback: (element: Element) => void
       : getChildNodes(parent);
 
   for (const node of startingNodes) {
-    visit(node);
+    if (visit(node)) {
+      return;
+    }
   }
 }
 
@@ -102,7 +110,10 @@ export function getDescendantElement(parent: XmlParent | null, localName: string
   walkDescendants(parent, (element) => {
     if (!foundElement && localNameMatches(element, localName)) {
       foundElement = element;
+      return true;
     }
+
+    return false;
   });
 
   return foundElement;
