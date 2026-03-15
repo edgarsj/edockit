@@ -683,7 +683,7 @@ async function browserDigest(fileContent: Uint8Array, hashAlgo: string): Promise
     throw new Error(`Unsupported browser digest algorithm: ${hashAlgo}`);
   }
 
-  const hashBuffer = await window.crypto.subtle.digest(browserAlgo, fileContent);
+  const hashBuffer = await window.crypto.subtle.digest(browserAlgo, new Uint8Array(fileContent));
 
   // Convert ArrayBuffer to Base64
   const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -1148,7 +1148,12 @@ export async function verifySignedInfo(
 
     try {
       const subtle = getCryptoSubtle();
-      const result = await subtle.verify(algorithm, publicKey, signatureBytes, signedData);
+      const result = await subtle.verify(
+        algorithm,
+        publicKey,
+        new Uint8Array(signatureBytes),
+        new Uint8Array(signedData),
+      );
 
       if (result) {
         return {

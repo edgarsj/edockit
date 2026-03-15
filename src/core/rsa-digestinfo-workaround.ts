@@ -279,7 +279,7 @@ export async function verifyRsaWithNonStandardDigestInfo(
       // Normalize to Web Crypto format: SHA-1, SHA-256, SHA-384, SHA-512
       let hashName = hashAlgorithm.toUpperCase().replace(/-/g, "");
       hashName = hashName.replace(/^SHA(\d)/, "SHA-$1");
-      const hashBuffer = await window.crypto.subtle.digest(hashName, dataToVerify);
+      const hashBuffer = await window.crypto.subtle.digest(hashName, new Uint8Array(dataToVerify));
       expectedHash = new Uint8Array(hashBuffer);
     } else {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
