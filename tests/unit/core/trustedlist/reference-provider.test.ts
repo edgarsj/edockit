@@ -199,7 +199,7 @@ describe("trusted-list providers", () => {
     consoleWarnSpy.mockRestore();
   });
 
-  it("creates a remote HTTP provider", async () => {
+  it("creates a remote HTTP provider and normalizes HeadersInit", async () => {
     const match: TrustListMatch = {
       found: true,
       trustedAtTime: true,
@@ -216,9 +216,9 @@ describe("trusted-list providers", () => {
     const provider: TrustListProvider = createRemoteTrustListProvider({
       url: "https://example.test/api/trust-list/match",
       fetch,
-      headers: {
-        "x-test-header": "1",
-      },
+      headers: new Headers({
+        "X-Test-Header": "1",
+      }),
     });
 
     const query: TrustListQuery = {
@@ -237,6 +237,45 @@ describe("trusted-list providers", () => {
         "x-test-header": "1",
       },
       body: JSON.stringify(query),
+      signal: undefined,
     });
+  });
+
+  it("times out remote HTTP provider requests", async () => {
+    jest.useFakeTimers();
+
+    const fetch = jest.fn().mockImplementation(
+      (_url, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        }),
+    );
+
+    const provider = createRemoteTrustListProvider({
+      url: "https://example.test/api/trust-list/match",
+      fetch,
+      timeout: 25,
+    });
+
+    const query: TrustListQuery = {
+      purpose: "signature_issuer",
+      subjectDn: "CN=Issuer,O=Example,C=LV",
+      skiHex: "deadbeef",
+      spkiSha256Hex: "aa11",
+      time: new Date("2024-06-01T00:00:00Z"),
+    };
+
+    const matchPromise = provider.match(query);
+    const rejection = expect(matchPromise).rejects.toThrow("Trust-list API timed out after 25 ms");
+    await jest.advanceTimersByTimeAsync(25);
+
+    await rejection;
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    jest.useRealTimers();
   });
 });

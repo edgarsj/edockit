@@ -186,6 +186,9 @@ export function normalizeKeyIdentifier(
 
   const hexCandidate = normalizeHex(trimmedInput);
   const hexLikeInput = trimmedInput.replace(/[\s:-]+/g, "");
+  // Prefer explicit hex-like inputs before attempting base64 decoding. Short values such as
+  // "AABB" are syntactically valid in both encodings; treating even-length hex-safe input as
+  // hex first preserves common SKI/AKI representations and makes the priority order explicit.
   if (hexCandidate && /^[a-fA-F0-9]+$/.test(hexLikeInput) && hexLikeInput.length % 2 === 0) {
     return hexCandidate;
   }
