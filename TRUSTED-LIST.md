@@ -2,6 +2,8 @@
 
 This document describes the intended trusted-list integration model for `edockit`.
 
+If you are implementing trusted-list verification in a real app, this document is required reading. The root `README.md` only shows the shortest happy-path examples.
+
 ## Package Surfaces
 
 `edockit` exposes the verification API and the trusted-list contract types:
@@ -41,6 +43,12 @@ This avoids:
 - duplicating trusted-list data in your app and in the package
 - tying freshness to npm package releases
 - shipping extra trusted-list bytes you do not control
+
+Important:
+
+- `createTrustListProvider({ url })` expects the compact bundle JSON itself
+- it does not read `manifest.json`
+- if you generate a manifest, use it for your own rollout logic, then pass the actual bundle URL to the provider
 
 ## Browser: Local JSON
 
@@ -227,6 +235,16 @@ await generateTrustedListBundle({
   baseUrl: "/assets",
 });
 ```
+
+The runtime provider still loads the bundle JSON:
+
+```typescript
+const trustListProvider = createTrustListProvider({
+  url: "/assets/trusted-list.json",
+});
+```
+
+Do not point `createTrustListProvider({ url })` at `trusted-list-manifest.json`.
 
 If you want to do the same thing in this repository itself, the repo script still exists:
 
