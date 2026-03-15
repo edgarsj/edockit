@@ -76,7 +76,10 @@ export function createTrustListProvider(
   return {
     async match(query) {
       if (!trustedListDataPromise) {
-        trustedListDataPromise = loadTrustedListDataFromUrl(options);
+        trustedListDataPromise = loadTrustedListDataFromUrl(options).catch((error) => {
+          trustedListDataPromise = null;
+          throw error;
+        });
       }
 
       const trustedListData = await trustedListDataPromise;

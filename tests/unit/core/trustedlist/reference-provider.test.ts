@@ -114,6 +114,65 @@ describe("trusted-list providers", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("retries URL bundle loading after a transient fetch failure", async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () =>
+          createBundle([
+            {
+              skiHex: "deadbeef",
+              spkiSha256Hex: "aa11",
+              subjectDn: "CN=Issuer,O=Example,C=LV",
+              country: "LV",
+              tspName: "LVRTC",
+              serviceType: "CA/QC",
+              source: "eu",
+              sourceLabel: "EU LOTL",
+              history: [
+                {
+                  status: "granted",
+                  from: "2024-01-01T00:00:00Z",
+                  to: null,
+                },
+              ],
+            },
+          ]),
+      });
+
+    const provider = createTrustListProvider({
+      url: "https://example.test/trusted-list.json",
+      fetch,
+    });
+
+    const query: TrustListQuery = {
+      purpose: "signature_issuer",
+      subjectDn: "CN=Issuer,O=Example,C=LV",
+      skiHex: "deadbeef",
+      spkiSha256Hex: "aa11",
+      time: new Date("2024-06-01T00:00:00Z"),
+    };
+
+    await expect(provider.match(query)).rejects.toThrow(
+      'Failed to fetch trusted-list data from "https://example.test/trusted-list.json": HTTP 503',
+    );
+
+    await expect(provider.match(query)).resolves.toMatchObject({
+      found: true,
+      trustedAtTime: true,
+      confidence: "exact",
+      country: "LV",
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("warns once when the bundled snapshot is older than 14 days", async () => {
     const dateNowSpy = jest
       .spyOn(Date, "now")
