@@ -15,8 +15,11 @@ interface CanonMethod {
 const CANONICALIZATION_METHODS = {
   default: "c14n",
   "http://www.w3.org/TR/2001/REC-xml-c14n-20010315": "c14n",
+  "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments": "c14n",
   "http://www.w3.org/2006/12/xml-c14n11": "c14n11",
+  "http://www.w3.org/2006/12/xml-c14n11#WithComments": "c14n11",
   "http://www.w3.org/2001/10/xml-exc-c14n#": "c14n_exc",
+  "http://www.w3.org/2001/10/xml-exc-c14n#WithComments": "c14n_exc",
 };
 
 // Internal method implementations
@@ -54,6 +57,11 @@ const NODE_TYPES = {
 
 // Options for exclusive canonicalization
 interface ExcC14NOptions {
+  inclusiveNamespacePrefixList?: string[];
+  isStartingNode?: boolean;
+}
+
+interface CanonicalizeOptions {
   inclusiveNamespacePrefixList?: string[];
   isStartingNode?: boolean;
 }
@@ -288,8 +296,25 @@ class XMLCanonicalizer {
     analyzeNode(rootNode as NodeWithWhitespace);
   }
 
-  // Standard canonicalization method
   canonicalize(
+    node: NodeWithWhitespace,
+    visibleNamespaces = new Map<string, string>(),
+    options: CanonicalizeOptions = { isStartingNode: true },
+  ): string {
+    if (this.method.isCanonicalizationMethod === "c14n_exc") {
+      return this.canonicalizeExclusive(node, visibleNamespaces, {
+        inclusiveNamespacePrefixList: options.inclusiveNamespacePrefixList,
+        isStartingNode: options.isStartingNode,
+      });
+    }
+
+    return this.canonicalizeStandard(node, visibleNamespaces, {
+      isStartingNode: options.isStartingNode ?? true,
+    });
+  }
+
+  // Standard canonicalization method
+  private canonicalizeStandard(
     node: NodeWithWhitespace,
     visibleNamespaces = new Map<string, string>(),
     options = { isStartingNode: true },
@@ -453,7 +478,7 @@ class XMLCanonicalizer {
           }
 
           // Recursively canonicalize the child element
-          result += this.canonicalize(child, elementVisibleNamespaces, {
+          result += this.canonicalizeStandard(child, elementVisibleNamespaces, {
             isStartingNode: false,
           });
 

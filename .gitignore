@@ -2,9 +2,10 @@
 node_modules/
 
 # Build output
-dist/
-lib/
-coverage/
+/dist/
+/lib/
+/coverage/
+trusted-list/
 
 # Logs
 logs

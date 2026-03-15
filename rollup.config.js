@@ -5,61 +5,75 @@ import esbuild from "rollup-plugin-esbuild";
 
 const packageJson = require("./package.json");
 
-// Simple banner with just the essentials
 const banner = `/*!
  * MIT License
  * Copyright (c) 2025 Edgars Jēkabsons, ZenomyTech SIA
  */`;
 
-export default [
-  // ESM build
-  {
-    input: "src/index.ts",
-    output: {
-      file: packageJson.module,
+function createTypescriptPlugin() {
+  return typescript({
+    tsconfig: "./tsconfig.rollup.json",
+  });
+}
+
+function isExternalModule(id) {
+  return id === "fflate" || id === "@peculiar/x509" || id === "crypto" || id.startsWith("node:");
+}
+
+const moduleInputs = {
+  index: "src/index.ts",
+  "trusted-list": "src/trusted-list.ts",
+  "trusted-list-build": "src/trusted-list-build.ts",
+  "trusted-list-bundled": "src/trusted-list-bundled.ts",
+  "trusted-list-http": "src/trusted-list-http.ts",
+};
+
+const moduleBuild = {
+  input: moduleInputs,
+  plugins: [resolve(), commonjs(), createTypescriptPlugin()],
+  external: isExternalModule,
+  output: [
+    {
+      dir: "dist",
+      entryFileNames: "[name].esm.js",
       format: "esm",
       sourcemap: true,
       banner,
     },
-    plugins: [resolve(), commonjs(), typescript({ tsconfig: "./tsconfig.json" })],
-    external: ["fflate", "@peculiar/x509", "crypto"],
-  },
-  // CommonJS build
-  {
-    input: "src/index.ts",
-    output: {
-      file: packageJson.main,
+    {
+      dir: "dist",
+      entryFileNames: "[name].cjs.js",
       format: "cjs",
       sourcemap: true,
       banner,
     },
-    plugins: [resolve(), commonjs(), typescript({ tsconfig: "./tsconfig.json" })],
-    external: ["fflate", "@peculiar/x509"],
-  },
-  // UMD build
-  {
-    input: "src/index.ts",
-    output: {
-      file: packageJson.browser,
-      format: "umd",
-      name: "edockit",
-      sourcemap: true,
-      globals: {
-        fflate: "fflate",
-        "@peculiar/x509": "peculiarX509",
-        crypto: "crypto",
-      },
-      banner,
+  ],
+};
+
+const rootUmdBuild = {
+  input: "src/index.ts",
+  output: {
+    file: packageJson.browser,
+    format: "umd",
+    name: "edockit",
+    sourcemap: true,
+    globals: {
+      fflate: "fflate",
+      "@peculiar/x509": "peculiarX509",
+      crypto: "crypto",
     },
-    plugins: [
-      resolve(),
-      commonjs(),
-      typescript({ tsconfig: "./tsconfig.json" }),
-      esbuild({
-        minify: true,
-        target: "es2015",
-      }),
-    ],
-    external: ["fflate", "@peculiar/x509"],
+    banner,
   },
-];
+  plugins: [
+    resolve(),
+    commonjs(),
+    createTypescriptPlugin(),
+    esbuild({
+      minify: true,
+      target: "es2015",
+    }),
+  ],
+  external: isExternalModule,
+};
+
+export default [moduleBuild, rootUmdBuild];

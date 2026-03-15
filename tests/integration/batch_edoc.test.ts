@@ -6,13 +6,21 @@ import {
   getSignerDisplayName,
   formatValidityPeriod,
 } from "../../src/core/certificate";
-import { verifyChecksums, verifySignature, ValidationStatus } from "../../src/core/verification";
+import {
+  verifyChecksums,
+  verifySignature,
+  ValidationStatus,
+  VerificationResult,
+} from "../../src/core/verification";
+import bundledTrustedListBundle from "../../src/data/trusted-list";
+import { createTrustListProvider } from "../../src/trusted-list";
 
 // Path to directories containing eDoc samples
 const sensitiveSamplesDir = join(__dirname, "../fixtures/sensitive/valid_samples");
 const validSamplesDir = join(__dirname, "../fixtures/valid_samples");
 const sensitiveSamplesDirExists = existsSync(sensitiveSamplesDir);
 const validSamplesDirExists = existsSync(validSamplesDir);
+const trustListProvider = createTrustListProvider({ data: bundledTrustedListBundle });
 
 // File entry in filelist.json
 interface FileEntry {
@@ -21,6 +29,71 @@ interface FileEntry {
   expectedLimitation?: string;
   note?: string;
 }
+
+type ExpectedChecklistStatus = "pass" | "fail" | "skipped" | "indeterminate";
+
+interface PublicSampleChecklistExpectation {
+  checklistStatuses: Record<string, ExpectedChecklistStatus>;
+  trustListMatch: {
+    confidence: "exact" | "ski_dn" | "dn_only";
+    country: string;
+    detailIncludes: string;
+  };
+}
+
+const PUBLIC_SAMPLE_CHECKLIST_EXPECTATIONS: Record<string, PublicSampleChecklistExpectation> = {
+  "SampleFile.edoc": {
+    checklistStatuses: {
+      document_integrity: "pass",
+      signature_valid: "pass",
+      certificate_valid_at_signing_time: "pass",
+      timestamp_present: "pass",
+      timestamp_valid: "pass",
+      timestamp_authority_trusted_at_signing_time: "pass",
+      certificate_not_revoked_at_signing_time: "skipped",
+      issuer_trusted_at_signing_time: "pass",
+    },
+    trustListMatch: {
+      confidence: "ski_dn",
+      country: "LV",
+      detailIncludes: "issuer match by SKI + DN",
+    },
+  },
+  "terms_of_Account_Agreement_28062025_ENG.asice": {
+    checklistStatuses: {
+      document_integrity: "pass",
+      signature_valid: "pass",
+      certificate_valid_at_signing_time: "pass",
+      timestamp_present: "pass",
+      timestamp_valid: "pass",
+      timestamp_authority_trusted_at_signing_time: "pass",
+      certificate_not_revoked_at_signing_time: "skipped",
+      issuer_trusted_at_signing_time: "pass",
+    },
+    trustListMatch: {
+      confidence: "exact",
+      country: "LV",
+      detailIncludes: "issuer match by SPKI",
+    },
+  },
+  "terms_of_use_of_private_credit_cards_25052018_RUS.edoc": {
+    checklistStatuses: {
+      document_integrity: "pass",
+      signature_valid: "pass",
+      certificate_valid_at_signing_time: "pass",
+      timestamp_present: "pass",
+      timestamp_valid: "pass",
+      timestamp_authority_trusted_at_signing_time: "pass",
+      certificate_not_revoked_at_signing_time: "skipped",
+      issuer_trusted_at_signing_time: "pass",
+    },
+    trustListMatch: {
+      confidence: "exact",
+      country: "LV",
+      detailIncludes: "issuer match by SPKI",
+    },
+  },
+};
 
 // Load filelist.json if it exists
 const loadFilelist = (directory: string): FileEntry[] | null => {
@@ -215,6 +288,77 @@ const verifyEdocFiles = async (
   };
 };
 
+const verifyTrustedListChecklistForFile = async (
+  filePath: string,
+): Promise<
+  {
+    signerName: string;
+    result: VerificationResult;
+  }[]
+> => {
+  const edocBuffer = readFileSync(filePath);
+  const container = parseEdoc(edocBuffer);
+
+  if (container.signatures.length === 0) {
+    throw new Error("No signatures found in container");
+  }
+
+  return Promise.all(
+    container.signatures.map(async (signature, index) => {
+      let signerName = `Unknown-${index}`;
+
+      if (signature.certificatePEM) {
+        try {
+          const certInfo = await parseCertificate(signature.certificatePEM);
+          signerName = getSignerDisplayName(certInfo);
+        } catch {
+          // Keep fallback signer label for assertion output.
+        }
+      }
+
+      const result = await verifySignature(signature, container.files, {
+        verifyTime: signature.signingTime,
+        checkRevocation: false,
+        includeChecklist: true,
+        trustListProvider,
+      });
+
+      return {
+        signerName,
+        result,
+      };
+    }),
+  );
+};
+
+function getExpectedTrustChecklistStatus(result: VerificationResult) {
+  if (!result.trustListMatch) {
+    return "indeterminate";
+  }
+
+  if (result.trustListMatch.confidence === "dn_only") {
+    return "indeterminate";
+  }
+
+  if (result.trustListMatch.trustedAtTime === true) {
+    return "pass";
+  }
+
+  if (result.trustListMatch.trustedAtTime === false || !result.trustListMatch.found) {
+    return "fail";
+  }
+
+  return "indeterminate";
+}
+
+function getChecklistStatusMap(
+  result: VerificationResult,
+): Record<string, ExpectedChecklistStatus> {
+  return Object.fromEntries(
+    (result.checklist || []).map((item) => [item.check, item.status as ExpectedChecklistStatus]),
+  );
+}
+
 // First test suite for sensitive samples
 const describeSensitive = sensitiveSamplesDirExists ? describe : describe.skip;
 
@@ -338,6 +482,98 @@ describePublic("Public Samples Batch Verification", () => {
           );
           throw error; // Re-throw to fail the test
         }
+      });
+    });
+  }
+});
+
+describeSensitive("Sensitive Samples Trusted List Checklist", () => {
+  const sensitiveFiles = collectFiles(sensitiveSamplesDir, [".edoc", ".asice"]);
+
+  if (sensitiveFiles.length === 0) {
+    it("No .edoc or .asice files found in sensitive directory for trust-list checklist tests", () => {
+      console.log(
+        "No .edoc or .asice files found in sensitive samples directory. Add some to run trust-list checklist integration tests.",
+      );
+      return;
+    });
+  } else {
+    sensitiveFiles.forEach((filePath) => {
+      const filename = filePath.split("/").pop() || "";
+
+      it(`should compute trusted-list checklist plumbing for sensitive file: ${filename}`, async () => {
+        const results = await verifyTrustedListChecklistForFile(filePath);
+
+        results.forEach(({ signerName, result }, index) => {
+          const trustChecklistItem = result.checklist?.find(
+            (item) => item.check === "issuer_trusted_at_signing_time",
+          );
+
+          expect(result.checklist).toBeDefined();
+          expect(trustChecklistItem).toBeDefined();
+          expect(result.trustListMatch).toBeDefined();
+          expect(trustChecklistItem?.status).toBe(getExpectedTrustChecklistStatus(result));
+
+          if (result.trustListMatch?.country) {
+            expect(trustChecklistItem?.country).toBe(result.trustListMatch.country);
+          }
+
+          console.log(
+            `${filename}: trust-list signature #${index + 1} (${signerName}) -> ${trustChecklistItem?.status} ${result.trustListMatch?.detail || ""}`.trim(),
+          );
+        });
+      });
+    });
+  }
+});
+
+describePublic("Public Samples Trusted List Checklist", () => {
+  const publicFiles = collectFiles(validSamplesDir, [".edoc", ".asice"]);
+
+  if (publicFiles.length === 0) {
+    it("No .edoc or .asice files found in public directory for trust-list checklist tests", () => {
+      console.log(
+        "No .edoc or .asice files found in public samples directory. Add some to run trust-list checklist integration tests.",
+      );
+      return;
+    });
+  } else {
+    publicFiles.forEach((filePath) => {
+      const filename = filePath.split("/").pop() || "";
+
+      it(`should compute trusted-list checklist plumbing for public file: ${filename}`, async () => {
+        const results = await verifyTrustedListChecklistForFile(filePath);
+        const expectedChecklist = PUBLIC_SAMPLE_CHECKLIST_EXPECTATIONS[filename];
+
+        results.forEach(({ signerName, result }, index) => {
+          const trustChecklistItem = result.checklist?.find(
+            (item) => item.check === "issuer_trusted_at_signing_time",
+          );
+
+          expect(result.checklist).toBeDefined();
+          expect(trustChecklistItem).toBeDefined();
+          expect(result.trustListMatch).toBeDefined();
+          expect(trustChecklistItem?.status).toBe(getExpectedTrustChecklistStatus(result));
+
+          if (result.trustListMatch?.country) {
+            expect(trustChecklistItem?.country).toBe(result.trustListMatch.country);
+          }
+
+          if (expectedChecklist) {
+            expect(getChecklistStatusMap(result)).toEqual(expectedChecklist.checklistStatuses);
+            expect(result.trustListMatch).toMatchObject({
+              confidence: expectedChecklist.trustListMatch.confidence,
+              country: expectedChecklist.trustListMatch.country,
+            });
+            expect(result.trustListMatch?.detail).toContain(
+              expectedChecklist.trustListMatch.detailIncludes,
+            );
+          }
+
+          console.log(
+            `${filename}: trust-list signature #${index + 1} (${signerName}) -> ${trustChecklistItem?.status} ${result.trustListMatch?.detail || ""}`.trim(),
+          );
+        });
       });
     });
   }

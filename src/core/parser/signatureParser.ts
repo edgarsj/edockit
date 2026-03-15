@@ -14,6 +14,41 @@ import { extractSignerInfo } from "../certificate";
 import { SignatureInfo } from "./types";
 import { formatPEM } from "./certificateUtils";
 
+function parseInclusiveNamespacesPrefixList(
+  canonicalizationMethodElement: Element | null,
+): string[] | undefined {
+  if (!canonicalizationMethodElement) {
+    return undefined;
+  }
+
+  const inclusiveNamespacesElement = querySelector(
+    canonicalizationMethodElement,
+    "ec\\:InclusiveNamespaces, InclusiveNamespaces",
+  );
+  const prefixList = inclusiveNamespacesElement?.getAttribute("PrefixList")?.trim();
+
+  if (!prefixList) {
+    return undefined;
+  }
+
+  const prefixes = prefixList.split(/\s+/).filter(Boolean);
+  return prefixes.length > 0 ? prefixes : undefined;
+}
+
+function createTimestampCanonicalizer(canonicalizationMethod?: string): XMLCanonicalizer {
+  if (!canonicalizationMethod) {
+    return new XMLCanonicalizer();
+  }
+
+  try {
+    return XMLCanonicalizer.fromMethod(canonicalizationMethod);
+  } catch {
+    // Fall back to default canonicalization so timestamp binding is still attempted
+    // instead of being skipped entirely for unsupported URI variants.
+    return new XMLCanonicalizer();
+  }
+}
+
 /**
  * Find signature files in the eDoc container
  * @param files Map of filenames to file contents
@@ -152,12 +187,41 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   const signatureValueEl = querySelector(signatureElement, "ds\\:SignatureValue, SignatureValue");
   const signatureValue = signatureValueEl?.textContent?.replace(/\s+/g, "") || "";
 
+  // Extract signature timestamp (RFC 3161) and its canonicalization method
+  let signatureTimestamp: string | undefined;
+  let signatureTimestampCanonicalizationMethod: string | undefined;
+  let signatureTimestampInclusiveNamespacePrefixList: string[] | undefined;
+  const signatureTimestampElement = querySelector(
+    xmlDoc,
+    "xades\\:SignatureTimeStamp, SignatureTimeStamp",
+  );
+  if (signatureTimestampElement) {
+    const timestampC14nMethodEl = querySelector(
+      signatureTimestampElement,
+      "ds\\:CanonicalizationMethod, CanonicalizationMethod",
+    );
+    signatureTimestampCanonicalizationMethod =
+      timestampC14nMethodEl?.getAttribute("Algorithm") || undefined;
+    signatureTimestampInclusiveNamespacePrefixList =
+      parseInclusiveNamespacesPrefixList(timestampC14nMethodEl);
+
+    const timestampElement = querySelector(
+      signatureTimestampElement,
+      "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
+    );
+    if (timestampElement && timestampElement.textContent) {
+      signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
+    }
+  }
+
   // Compute canonicalized SignatureValue element for timestamp verification
   let canonicalSignatureValue: string | undefined;
   if (signatureValueEl) {
     try {
-      const canonicalizer = new XMLCanonicalizer();
-      canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl);
+      const canonicalizer = createTimestampCanonicalizer(signatureTimestampCanonicalizationMethod);
+      canonicalSignatureValue = canonicalizer.canonicalize(signatureValueEl, new Map(), {
+        inclusiveNamespacePrefixList: signatureTimestampInclusiveNamespacePrefixList,
+      });
     } catch {
       // Canonicalization failed - leave undefined
     }
@@ -292,16 +356,6 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     if (digestValueEl && digestValueEl.textContent) {
       signedChecksums[cleanUri] = digestValueEl.textContent.replace(/\s+/g, "");
     }
-  }
-
-  // Extract signature timestamp (RFC 3161) from xades:SignatureTimeStamp
-  let signatureTimestamp: string | undefined;
-  const timestampElement = querySelector(
-    xmlDoc,
-    "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
-  );
-  if (timestampElement && timestampElement.textContent) {
-    signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
   }
 
   return {
