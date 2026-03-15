@@ -7,10 +7,16 @@ import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
 import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
-import { verifyTimestamp, getTimestampTime } from "./timestamp/verify";
+import { verifyTimestamp } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
 import { base64ToUint8Array } from "../utils/encoding";
 import { verifyRsaWithNonStandardDigestInfo } from "./rsa-digestinfo-workaround";
+import {
+  extractCertificateIdentityFromCertificate,
+  extractIssuerIdentityFromCertificate,
+} from "./trustedlist/identity";
+import type { TrustListMatch, TrustListProvider } from "./trustedlist/contract";
+import type { TrustedListFetchOptions } from "./trustedlist/types";
 
 /**
  * Options for verification process
@@ -26,6 +32,14 @@ export interface VerificationOptions {
   revocationOptions?: RevocationCheckOptions;
   /** Verify RFC 3161 timestamp if present (default: true) */
   verifyTimestamps?: boolean;
+  /** Include a structured verification checklist in the result (default: false) */
+  includeChecklist?: boolean;
+  /** Trusted-list provider used for issuer and timestamp authority trust checks */
+  trustListProvider?: TrustListProvider;
+  /** Options used when fetching issuer certificates needed for stronger trust-list matching */
+  trustedListFetchOptions?: TrustedListFetchOptions;
+  /** Allow DN-only trusted-list matches to be treated as positive evidence */
+  allowWeakDnOnlyTrustMatch?: boolean;
 }
 
 /**
@@ -93,6 +107,26 @@ export interface ValidationLimitation {
   platform?: string;
 }
 
+export type ChecklistStatus = "pass" | "fail" | "skipped" | "indeterminate";
+
+export type ChecklistCheck =
+  | "document_integrity"
+  | "signature_valid"
+  | "certificate_valid_at_signing_time"
+  | "timestamp_present"
+  | "timestamp_valid"
+  | "timestamp_authority_trusted_at_signing_time"
+  | "certificate_not_revoked_at_signing_time"
+  | "issuer_trusted_at_signing_time";
+
+export interface ChecklistItem {
+  check: ChecklistCheck;
+  label: string;
+  status: ChecklistStatus;
+  detail?: string;
+  country?: string;
+}
+
 /**
  * Complete verification result
  */
@@ -110,7 +144,378 @@ export interface VerificationResult {
   signature?: SignatureVerificationResult;
   /** Timestamp verification result (if timestamp present and verifyTimestamps enabled) */
   timestamp?: TimestampVerificationResult;
+  checklist?: ChecklistItem[];
+  trustListMatch?: TrustListMatch;
+  timestampTrustListMatch?: TrustListMatch;
   errors?: string[];
+}
+
+function createChecklistItem(
+  check: ChecklistCheck,
+  label: string,
+  status: ChecklistStatus,
+  detail?: string,
+  country?: string,
+): ChecklistItem {
+  return {
+    check,
+    label,
+    status,
+    ...(detail ? { detail } : {}),
+    ...(country ? { country } : {}),
+  };
+}
+
+function getFailedChecksumDetail(checksumResult: ChecksumVerificationResult): string {
+  const failedChecksums = Object.entries(checksumResult.details)
+    .filter(([_, details]) => !details.matches)
+    .map(([filename]) => filename)
+    .join(", ");
+
+  return failedChecksums
+    ? `Checksum validation failed for files: ${failedChecksums}`
+    : "Checksum validation failed";
+}
+
+function buildTrustChecklistItem(
+  check: ChecklistCheck,
+  label: string,
+  match: TrustListMatch | undefined,
+  error: string | undefined,
+  fallbackDetail: string,
+  allowWeakDnOnlyTrustMatch: boolean,
+): ChecklistItem {
+  if (error) {
+    return createChecklistItem(check, label, "indeterminate", error);
+  }
+
+  if (!match) {
+    return createChecklistItem(check, label, "indeterminate", fallbackDetail);
+  }
+
+  if (match.confidence === "dn_only" && !allowWeakDnOnlyTrustMatch) {
+    return createChecklistItem(
+      check,
+      label,
+      "indeterminate",
+      match.detail || fallbackDetail,
+      match.country,
+    );
+  }
+
+  if (match.trustedAtTime === true) {
+    return createChecklistItem(check, label, "pass", match.detail, match.country);
+  }
+
+  if (match.trustedAtTime === false || !match.found) {
+    return createChecklistItem(check, label, "fail", match.detail, match.country);
+  }
+
+  return createChecklistItem(
+    check,
+    label,
+    "indeterminate",
+    match.detail || fallbackDetail,
+    match.country,
+  );
+}
+
+function buildVerificationChecklist({
+  options,
+  signatureInfo,
+  certificateValidityAtSigningTime,
+  certificateResult,
+  checksumResult,
+  signatureResult,
+  timestampResult,
+  overallStatus,
+  trustListMatch,
+  trustListError,
+  timestampTrustListMatch,
+  timestampTrustListError,
+}: {
+  options: VerificationOptions;
+  signatureInfo: SignatureInfo;
+  certificateValidityAtSigningTime: { isValid: boolean; reason?: string };
+  certificateResult: CertificateVerificationResult;
+  checksumResult: ChecksumVerificationResult;
+  signatureResult: SignatureVerificationResult;
+  timestampResult?: TimestampVerificationResult;
+  overallStatus: ValidationStatus;
+  trustListMatch?: TrustListMatch;
+  trustListError?: string;
+  timestampTrustListMatch?: TrustListMatch;
+  timestampTrustListError?: string;
+}): ChecklistItem[] {
+  const checklist: ChecklistItem[] = [];
+
+  if (options.verifyChecksums === false) {
+    checklist.push(
+      createChecklistItem(
+        "document_integrity",
+        "Document integrity",
+        "skipped",
+        "Checksum verification not enabled",
+      ),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "document_integrity",
+        "Document integrity",
+        checksumResult.isValid ? "pass" : "fail",
+        checksumResult.isValid ? undefined : getFailedChecksumDetail(checksumResult),
+      ),
+    );
+  }
+
+  if (options.verifySignatures === false) {
+    checklist.push(
+      createChecklistItem(
+        "signature_valid",
+        "Signature cryptographically valid",
+        "skipped",
+        "Signature verification not enabled",
+      ),
+    );
+  } else if (signatureResult.unsupportedPlatform) {
+    checklist.push(
+      createChecklistItem(
+        "signature_valid",
+        "Signature cryptographically valid",
+        "indeterminate",
+        signatureResult.reason || "Signature verification is not supported on this platform",
+      ),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "signature_valid",
+        "Signature cryptographically valid",
+        signatureResult.isValid ? "pass" : "fail",
+        signatureResult.isValid ? undefined : signatureResult.reason,
+      ),
+    );
+  }
+
+  if (certificateValidityAtSigningTime.isValid) {
+    checklist.push(
+      createChecklistItem(
+        "certificate_valid_at_signing_time",
+        "Certificate valid at trusted signing time",
+        "pass",
+      ),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "certificate_valid_at_signing_time",
+        "Certificate valid at trusted signing time",
+        overallStatus === "INDETERMINATE" ? "indeterminate" : "fail",
+        certificateValidityAtSigningTime.reason || certificateResult.reason,
+      ),
+    );
+  }
+
+  if (signatureInfo.signatureTimestamp) {
+    checklist.push(createChecklistItem("timestamp_present", "Signature timestamp present", "pass"));
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_present",
+        "Signature timestamp present",
+        "skipped",
+        "Signature timestamp not present",
+      ),
+    );
+  }
+
+  if (!signatureInfo.signatureTimestamp) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "skipped",
+        "Signature timestamp not present",
+      ),
+    );
+  } else if (options.verifyTimestamps === false) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "skipped",
+        "Timestamp verification not enabled",
+      ),
+    );
+  } else if (!timestampResult) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "indeterminate",
+        "Timestamp verification did not return a result",
+      ),
+    );
+  } else if (timestampResult.coversSignature === false) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "fail",
+        timestampResult.reason || "Timestamp token does not cover the signature value",
+      ),
+    );
+  } else if (!timestampResult.isValid) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "fail",
+        timestampResult.reason || "Timestamp verification failed",
+      ),
+    );
+  } else if (timestampResult.coversSignature === true) {
+    checklist.push(
+      createChecklistItem("timestamp_valid", "Timestamp valid and bound to signature", "pass"),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_valid",
+        "Timestamp valid and bound to signature",
+        "indeterminate",
+        timestampResult.reason ||
+          "Timestamp token verified, but signature binding could not be confirmed",
+      ),
+    );
+  }
+
+  if (!signatureInfo.signatureTimestamp) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_authority_trusted_at_signing_time",
+        "Timestamp authority trusted at signing time",
+        "skipped",
+        "Signature timestamp not present",
+      ),
+    );
+  } else if (options.verifyTimestamps === false) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_authority_trusted_at_signing_time",
+        "Timestamp authority trusted at signing time",
+        "skipped",
+        "Timestamp verification not enabled",
+      ),
+    );
+  } else if (!options.trustListProvider) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_authority_trusted_at_signing_time",
+        "Timestamp authority trusted at signing time",
+        "skipped",
+        "Trusted-list provider not configured",
+      ),
+    );
+  } else if (!timestampResult?.info?.tsaCertificate) {
+    checklist.push(
+      createChecklistItem(
+        "timestamp_authority_trusted_at_signing_time",
+        "Timestamp authority trusted at signing time",
+        "indeterminate",
+        timestampResult?.reason || "Timestamp verification did not produce a TSA certificate",
+      ),
+    );
+  } else {
+    checklist.push(
+      buildTrustChecklistItem(
+        "timestamp_authority_trusted_at_signing_time",
+        "Timestamp authority trusted at signing time",
+        timestampTrustListMatch,
+        timestampTrustListError,
+        "Timestamp authority trust check did not return a result",
+        options.allowWeakDnOnlyTrustMatch === true,
+      ),
+    );
+  }
+
+  if (options.checkRevocation === false) {
+    checklist.push(
+      createChecklistItem(
+        "certificate_not_revoked_at_signing_time",
+        "Certificate not revoked at signing time",
+        "skipped",
+        "Revocation check not enabled",
+      ),
+    );
+  } else if (!certificateResult.revocation) {
+    checklist.push(
+      createChecklistItem(
+        "certificate_not_revoked_at_signing_time",
+        "Certificate not revoked at signing time",
+        "skipped",
+        "Revocation check was not performed",
+      ),
+    );
+  } else if (
+    certificateResult.revocation.status === "good" ||
+    certificateResult.revocation.isValid
+  ) {
+    checklist.push(
+      createChecklistItem(
+        "certificate_not_revoked_at_signing_time",
+        "Certificate not revoked at signing time",
+        "pass",
+        certificateResult.revocation.reason,
+      ),
+    );
+  } else if (
+    certificateResult.revocation.status === "unknown" ||
+    certificateResult.revocation.status === "error"
+  ) {
+    checklist.push(
+      createChecklistItem(
+        "certificate_not_revoked_at_signing_time",
+        "Certificate not revoked at signing time",
+        "indeterminate",
+        certificateResult.revocation.reason,
+      ),
+    );
+  } else {
+    checklist.push(
+      createChecklistItem(
+        "certificate_not_revoked_at_signing_time",
+        "Certificate not revoked at signing time",
+        "fail",
+        certificateResult.revocation.reason,
+      ),
+    );
+  }
+
+  if (!options.trustListProvider) {
+    checklist.push(
+      createChecklistItem(
+        "issuer_trusted_at_signing_time",
+        "Issuer trusted at signing time",
+        "skipped",
+        "Trusted-list provider not configured",
+      ),
+    );
+  } else {
+    checklist.push(
+      buildTrustChecklistItem(
+        "issuer_trusted_at_signing_time",
+        "Issuer trusted at signing time",
+        trustListMatch,
+        trustListError,
+        "Issuer trust check did not return a result",
+        options.allowWeakDnOnlyTrustMatch === true,
+      ),
+    );
+  }
+
+  return checklist;
 }
 
 /**
@@ -814,6 +1219,10 @@ export async function verifySignature(
 ): Promise<VerificationResult> {
   const errors: string[] = [];
   let timestampResult: TimestampVerificationResult | undefined;
+  let trustListMatch: TrustListMatch | undefined;
+  let trustListError: string | undefined;
+  let timestampTrustListMatch: TrustListMatch | undefined;
+  let timestampTrustListError: string | undefined;
 
   // Verify timestamp first (if present) to get trusted time for cert validation
   let trustedSigningTime: Date = options.verifyTime || signatureInfo.signingTime;
@@ -835,6 +1244,10 @@ export async function verifySignature(
 
   // Verify certificate (time validity) - use trusted timestamp time if available
   const certResult = await verifyCertificate(signatureInfo.certificatePEM, trustedSigningTime);
+  const certificateValidityAtSigningTime = {
+    isValid: certResult.isValid,
+    reason: certResult.reason,
+  };
 
   // If certificate validation failed, add detailed error
   if (!certResult.isValid) {
@@ -886,20 +1299,60 @@ export async function verifySignature(
     }
   }
 
+  if (options.trustListProvider) {
+    try {
+      const issuerIdentity = await extractIssuerIdentityFromCertificate(
+        signatureInfo.certificatePEM,
+        {
+          certificateChain: signatureInfo.certificateChain,
+          fetchOptions: options.trustedListFetchOptions,
+        },
+      );
+
+      trustListMatch = await options.trustListProvider.match({
+        purpose: "signature_issuer",
+        subjectDn: issuerIdentity.issuerSubjectDn,
+        skiHex: issuerIdentity.authorityKeyIdentifierHex,
+        spkiSha256Hex: issuerIdentity.issuerCertificate?.spkiSha256Hex,
+        time: trustedSigningTime,
+      });
+    } catch (error) {
+      trustListError = `Trusted list check failed: ${error instanceof Error ? error.message : String(error)}`;
+      errors.push(trustListError);
+    }
+
+    if (timestampResult?.info?.tsaCertificate && timestampResult.info.genTime) {
+      try {
+        const tsaIdentity = await extractCertificateIdentityFromCertificate(
+          timestampResult.info.tsaCertificate,
+        );
+
+        timestampTrustListMatch = await options.trustListProvider.match({
+          purpose: "timestamp_tsa",
+          subjectDn: tsaIdentity.subjectDn,
+          skiHex: tsaIdentity.subjectKeyIdentifierHex,
+          spkiSha256Hex: tsaIdentity.spkiSha256Hex,
+          time: timestampResult.info.genTime,
+        });
+      } catch (error) {
+        timestampTrustListError = `Timestamp authority trusted-list check failed: ${error instanceof Error ? error.message : String(error)}`;
+        errors.push(timestampTrustListError);
+      }
+    }
+  }
+
   // Verify checksums
   const checksumResult =
     options.verifyChecksums !== false
       ? await verifyChecksums(signatureInfo, files)
       : { isValid: true, details: {} };
+  const checksumFailureDetail = checksumResult.isValid
+    ? undefined
+    : getFailedChecksumDetail(checksumResult);
 
   // If checksum validation failed, add detailed error
-  if (!checksumResult.isValid) {
-    const failedChecksums = Object.entries(checksumResult.details)
-      .filter(([_, details]) => !details.matches)
-      .map(([filename]) => filename)
-      .join(", ");
-
-    errors.push(`Checksum validation failed for files: ${failedChecksums}`);
+  if (checksumFailureDetail) {
+    errors.push(checksumFailureDetail);
   }
 
   // Verify XML signature if we have the necessary components
@@ -1072,6 +1525,23 @@ export async function verifySignature(
     }
   }
 
+  const checklist = options.includeChecklist
+    ? buildVerificationChecklist({
+        options,
+        signatureInfo,
+        certificateValidityAtSigningTime,
+        certificateResult: certResult,
+        checksumResult,
+        signatureResult,
+        timestampResult,
+        overallStatus: status,
+        trustListMatch,
+        trustListError,
+        timestampTrustListMatch,
+        timestampTrustListError,
+      })
+    : undefined;
+
   // Return the complete result
   return {
     isValid,
@@ -1082,6 +1552,9 @@ export async function verifySignature(
     checksums: checksumResult,
     signature: options.verifySignatures !== false ? signatureResult : undefined,
     timestamp: timestampResult,
+    checklist,
+    trustListMatch,
+    timestampTrustListMatch,
     errors: errors.length > 0 ? errors : undefined,
   };
 }

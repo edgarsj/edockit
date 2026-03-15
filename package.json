@@ -6,7 +6,7 @@
     "test": "jest --silent",
     "test:verbose": "jest",
     "test:watch": "jest --watch",
-    "build": "rollup -c",
+    "build": "node scripts/build-dist.mjs && tsc --emitDeclarationOnly",
     "dev": "rollup -c -w",
     "start": "node dist/index.js",
     "clean": "rimraf dist",
@@ -17,6 +17,7 @@
     "test:integration:verbose": "jest tests/integration",
     "test:browser": "web-test-runner",
     "test:browser:all": "ALL_BROWSERS=true web-test-runner",
+    "update-trusted-list": "tsx scripts/update-trusted-list.ts",
     "format": "prettier --write '**/*.{ts,js}'",
     "format:check": "prettier --check '**/*.{ts,js}'"
   },
@@ -63,16 +64,45 @@
     "rollup": "^2.79.2",
     "rollup-plugin-esbuild": "^6.2.1",
     "simple-git-hooks": "^2.13.1",
+    "tsx": "^4.20.6",
     "ts-jest": "^29.2.6",
     "typescript": "^5.8.2"
   },
   "module": "dist/index.esm.js",
   "browser": "dist/index.umd.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js"
+    },
+    "./trusted-list": {
+      "types": "./dist/trusted-list.d.ts",
+      "import": "./dist/trusted-list.esm.js",
+      "require": "./dist/trusted-list.cjs.js"
+    },
+    "./trusted-list/build": {
+      "types": "./dist/trusted-list-build.d.ts",
+      "import": "./dist/trusted-list-build.esm.js",
+      "require": "./dist/trusted-list-build.cjs.js"
+    },
+    "./trusted-list/bundled": {
+      "types": "./dist/trusted-list-bundled.d.ts",
+      "import": "./dist/trusted-list-bundled.esm.js",
+      "require": "./dist/trusted-list-bundled.cjs.js"
+    },
+    "./trusted-list/http": {
+      "types": "./dist/trusted-list-http.d.ts",
+      "import": "./dist/trusted-list-http.esm.js",
+      "require": "./dist/trusted-list-http.cjs.js"
+    }
+  },
   "files": [
     "dist",
     "LICENSE",
     "README.md",
+    "TRUSTED-LIST.md",
     "CHANGELOG.md"
   ],
   "repository": {

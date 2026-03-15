@@ -63,7 +63,7 @@ describe("Certificate Revocation (Browser)", () => {
         return;
       }
 
-      const { verifySignature } = await import("../src/core/verification");
+      const { verifySignature } = await import("../src/core/verification.ts");
       const sig = container.signatures[0];
       const result = await verifySignature(sig, container.files, {
         checkRevocation: false,
@@ -110,7 +110,7 @@ describe("Certificate Revocation (Browser)", () => {
         return;
       }
 
-      const { verifySignature } = await import("../src/core/verification");
+      const { verifySignature } = await import("../src/core/verification.ts");
       const sig = container.signatures[0];
       const result = await verifySignature(sig, container.files, {
         checkRevocation: true,
