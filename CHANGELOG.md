@@ -10,14 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Verification checklist output** - `verifySignature()` can now return a structured `checklist` with per-check status details when `includeChecklist: true`
-- **Trusted-list issuer validation** - `verifySignature()` can now return `trustListMatch` and evaluate `issuer_trusted_at_signing_time` when `checkTrustedList: true`
-- **Trusted-list helper APIs** - Added bundled trusted-list utilities including `getBundledTrustedList()`, `updateTrustedList()`, and `matchCertificateIssuerToTrustedList()`
-- **Node-only trusted-list builder** - Added the trusted-list bundle builder and `npm run update-trusted-list`
+- **Pluggable trusted-list provider support** - `verifySignature()` now uses `trustListProvider` for trust-list checks instead of built-in root-level trusted-list behavior
+- **Purpose-aware trusted-list matching** - Trusted-list checks now distinguish signer issuer lookup from timestamp authority lookup and expose both `trustListMatch` and `timestampTrustListMatch`
+- **Trusted-list package split** - Added opt-in subpath exports for `edockit/trusted-list`, `edockit/trusted-list/build`, `edockit/trusted-list/http`, and `edockit/trusted-list/bundled`
+- **Compact trusted-list bundle format** - Added local matching against compact JSON bundles with a dedicated provider contract
+- **Public Node-only trusted-list builder** - Added `edockit/trusted-list/build` for generating app-hosted trusted-list JSON, along with the repository `npm run update-trusted-list` script
 
 ### Fixed
 
 - **SignatureTimeStamp canonicalization** - Respect the timestamp's declared canonicalization method when hashing `ds:SignatureValue`, fixing false `coversSignature: false` results for some real samples
 - **Skip LDAP CRL distribution points** - Filter out non-HTTP(S) URLs from CRL distribution points to avoid failed fetch attempts on unsupported protocols like LDAP
+- **Timestamp trust-list evaluation** - Trusted-list verification now checks timestamp authorities at the timestamp signing time instead of only checking the signer issuer side
 
 ## [0.3.0] - 2026-01-04
 
