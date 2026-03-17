@@ -1533,7 +1533,7 @@ export async function verifySignature(
   // If everything else is valid but the issuer is not on the trusted list,
   // downgrade from VALID to INDETERMINATE — crypto is sound but trust is unconfirmed
   if (status === "VALID" && options.trustListProvider) {
-    if (trustListMatch && (!trustListMatch.found || !trustListMatch.trustedAtTime)) {
+    if (trustListMatch && (!trustListMatch.found || trustListMatch.trustedAtTime === false)) {
       status = "INDETERMINATE";
       isValid = false;
       statusMessage = trustListMatch.found
