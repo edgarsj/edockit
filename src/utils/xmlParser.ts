@@ -1,3 +1,6 @@
+import * as xmldom from "@xmldom/xmldom";
+import * as xpath from "xpath";
+
 /**
  * Recursive DOM traversal to find elements with a given tag name
  * (Fallback method when XPath is not available or fails)
@@ -99,15 +102,7 @@ export function createXMLParser(): XMLParserInterface {
   }
 
   // We're in Node.js, so use xmldom
-  try {
-    // Import dynamically to avoid bundling issues
-    const { DOMParser } = require("@xmldom/xmldom");
-    return new DOMParser();
-  } catch (e) {
-    throw new Error(
-      "XML DOM parser not available. In Node.js environments, please install @xmldom/xmldom package.",
-    );
-  }
+  return new xmldom.DOMParser() as unknown as XMLParserInterface;
 }
 
 /**
@@ -145,12 +140,12 @@ export function queryByXPath(
     }
     // Node.js environment with xpath module
     else {
-      const xpath = require("xpath");
+      const xpathLib = xpath;
       const nsResolver = createNsResolverForNode(namespaces);
 
       // Use a try-catch here to handle specific XPath issues
       try {
-        const nodes = xpath.select(xpathExpression, parent, nsResolver);
+        const nodes = xpathLib.select(xpathExpression, parent as any, nsResolver) as any;
         return nodes.length > 0 ? nodes[0] : null;
       } catch (err: unknown) {
         // If we get a namespace error, try a simpler XPath with just local-name()
@@ -166,7 +161,7 @@ export function queryByXPath(
           if (match && match[1]) {
             const elementName = match[1];
             const simplifiedXPath = `.//*[local-name()='${elementName}']`;
-            const nodes = xpath.select(simplifiedXPath, parent);
+            const nodes = xpathLib.select(simplifiedXPath, parent as any) as any;
             return nodes.length > 0 ? nodes[0] : null;
           }
         }
@@ -219,12 +214,12 @@ export function queryAllByXPath(
     }
     // Node.js environment with xpath module
     else {
-      const xpath = require("xpath");
+      const xpathLib = xpath;
       const nsResolver = createNsResolverForNode(namespaces);
 
       // Use a try-catch here to handle specific XPath issues
       try {
-        const nodes = xpath.select(xpathExpression, parent, nsResolver);
+        const nodes = xpathLib.select(xpathExpression, parent as any, nsResolver) as any;
         return nodes as Element[];
       } catch (err: unknown) {
         // If we get a namespace error, try a simpler XPath with just local-name()
@@ -240,7 +235,7 @@ export function queryAllByXPath(
           if (match && match[1]) {
             const elementName = match[1];
             const simplifiedXPath = `.//*[local-name()='${elementName}']`;
-            const nodes = xpath.select(simplifiedXPath, parent);
+            const nodes = xpathLib.select(simplifiedXPath, parent as any) as any;
             return nodes as Element[];
           }
         }
@@ -385,15 +380,8 @@ export function serializeToXML(node: Node): string {
     return new window.XMLSerializer().serializeToString(node);
   }
 
-  // If we're using xmldom
-  try {
-    const { XMLSerializer } = require("@xmldom/xmldom");
-    return new XMLSerializer().serializeToString(node);
-  } catch (e) {
-    throw new Error(
-      "XML Serializer not available. In Node.js environments, please install @xmldom/xmldom package.",
-    );
-  }
+  // Node.js — use xmldom
+  return new xmldom.XMLSerializer().serializeToString(node as any);
 }
 
 /**
