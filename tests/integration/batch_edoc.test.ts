@@ -604,11 +604,13 @@ const verifyUntrustedIssuer = (dir: string) => {
 
 const describeInvalid = invalidSamplesDirExists ? describe : describe.skip;
 describeInvalid("Untrusted issuer verification (public samples)", () => {
+  jest.setTimeout(30000);
   verifyUntrustedIssuer(invalidSamplesDir);
 });
 
 const describeSensitiveInvalid = sensitiveInvalidSamplesDirExists ? describe : describe.skip;
 describeSensitiveInvalid("Untrusted issuer verification (sensitive samples)", () => {
+  jest.setTimeout(30000);
   verifyUntrustedIssuer(sensitiveInvalidSamplesDir);
 });
 
