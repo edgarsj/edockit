@@ -576,10 +576,6 @@ const verifyUntrustedIssuer = (dir: string) => {
         certificate_not_revoked_at_signing_time: "skipped",
         issuer_trusted_at_signing_time: "fail",
       });
-
-      console.log(
-        `test-environment-sig-sample.edoc: ${result.status} - trustListMatch: ${JSON.stringify(result.trustListMatch)}`,
-      );
     },
   );
 
