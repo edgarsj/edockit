@@ -322,8 +322,8 @@ export function querySelector(parent: Document | Element, selector: string): Ele
 
   // Then try XPath as a fallback
   try {
-    const xpath = selectorToXPath(selector);
-    return queryByXPath(parent, xpath);
+    const xpathExpr = selectorToXPath(selector);
+    return queryByXPath(parent, xpathExpr);
   } catch (e) {
     console.warn("XPath query failed, using direct DOM traversal as fallback");
     return null;
@@ -363,8 +363,8 @@ export function querySelectorAll(parent: Document | Element, selector: string): 
 
   // Then try XPath as a fallback
   try {
-    const xpath = selectorToXPath(selector);
-    return queryAllByXPath(parent, xpath);
+    const xpathExpr = selectorToXPath(selector);
+    return queryAllByXPath(parent, xpathExpr);
   } catch (e) {
     console.warn("XPath query failed, using direct DOM traversal as fallback");
     return [];
