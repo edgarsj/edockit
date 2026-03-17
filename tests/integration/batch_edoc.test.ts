@@ -527,6 +527,91 @@ describeSensitive("Sensitive Samples Trusted List Checklist", () => {
   }
 });
 
+// Test that a document signed with a test/demo certificate (not in trusted list)
+// gets INDETERMINATE status when trust list checking is enabled
+const invalidSamplesDir = join(__dirname, "../fixtures/invalid_samples");
+const sensitiveInvalidSamplesDir = join(__dirname, "../fixtures/sensitive/invalid_samples");
+const invalidSamplesDirExists = existsSync(invalidSamplesDir);
+const sensitiveInvalidSamplesDirExists = existsSync(sensitiveInvalidSamplesDir);
+
+const verifyUntrustedIssuer = (dir: string) => {
+  const testEnvFile = join(dir, "test-environment-sig-sample.edoc");
+  const testEnvFileExists = existsSync(testEnvFile);
+
+  (testEnvFileExists ? it : it.skip)(
+    "should return INDETERMINATE when issuer is not in trusted list",
+    async () => {
+      const edocBuffer = readFileSync(testEnvFile);
+      const container = parseEdoc(edocBuffer);
+      expect(container.signatures.length).toBeGreaterThan(0);
+
+      const signature = container.signatures[0];
+      const result = await verifySignature(signature, container.files, {
+        verifyTime: signature.signingTime,
+        checkRevocation: false,
+        includeChecklist: true,
+        trustListProvider,
+      });
+
+      // Crypto should be sound
+      expect(result.checksums.isValid).toBe(true);
+      expect(result.signature?.isValid).toBe(true);
+
+      // But overall should be INDETERMINATE because issuer is not in trusted list
+      expect(result.isValid).toBe(false);
+      expect(result.status).toBe("INDETERMINATE");
+      expect(result.trustListMatch?.found).toBe(false);
+      expect(result.limitations).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "ISSUER_NOT_TRUSTED" })]),
+      );
+
+      // Verify checklist statuses
+      expect(getChecklistStatusMap(result)).toEqual({
+        document_integrity: "pass",
+        signature_valid: "pass",
+        certificate_valid_at_signing_time: "pass",
+        timestamp_present: "pass",
+        timestamp_valid: "pass",
+        timestamp_authority_trusted_at_signing_time: "indeterminate",
+        certificate_not_revoked_at_signing_time: "skipped",
+        issuer_trusted_at_signing_time: "fail",
+      });
+
+      console.log(
+        `test-environment-sig-sample.edoc: ${result.status} - trustListMatch: ${JSON.stringify(result.trustListMatch)}`,
+      );
+    },
+  );
+
+  (testEnvFileExists ? it : it.skip)(
+    "should return VALID without trust list provider (crypto-only check)",
+    async () => {
+      const edocBuffer = readFileSync(testEnvFile);
+      const container = parseEdoc(edocBuffer);
+      const signature = container.signatures[0];
+
+      const result = await verifySignature(signature, container.files, {
+        verifyTime: signature.signingTime,
+        checkRevocation: false,
+      });
+
+      // Without trust list, crypto-valid signatures should be VALID
+      expect(result.isValid).toBe(true);
+      expect(result.status).toBe("VALID");
+    },
+  );
+};
+
+const describeInvalid = invalidSamplesDirExists ? describe : describe.skip;
+describeInvalid("Untrusted issuer verification (public samples)", () => {
+  verifyUntrustedIssuer(invalidSamplesDir);
+});
+
+const describeSensitiveInvalid = sensitiveInvalidSamplesDirExists ? describe : describe.skip;
+describeSensitiveInvalid("Untrusted issuer verification (sensitive samples)", () => {
+  verifyUntrustedIssuer(sensitiveInvalidSamplesDir);
+});
+
 describePublic("Public Samples Trusted List Checklist", () => {
   const publicFiles = collectFiles(validSamplesDir, [".edoc", ".asice"]);
 
