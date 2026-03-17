@@ -34,6 +34,23 @@ const config = {
   browsers,
 
   plugins: [
+    // Stub out Node-only deps before esbuild tries to resolve them
+    {
+      name: "stub-node-deps",
+      resolveImport({ source }) {
+        if (source === "@xmldom/xmldom" || source === "xpath") {
+          return `/__node-stub__/${source}`;
+        }
+      },
+      serve(context) {
+        if (context.path.startsWith("/__node-stub__/")) {
+          return {
+            body: "export default {}; export const DOMParser = undefined; export const XMLSerializer = undefined; export const select = undefined;",
+            type: "js",
+          };
+        }
+      },
+    },
     esbuildPlugin({
       ts: true,
       tsconfig: "./tsconfig.json",

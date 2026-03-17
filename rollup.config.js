@@ -17,6 +17,18 @@ function createTypescriptPlugin() {
 }
 
 function isExternalModule(id) {
+  return (
+    id === "fflate" ||
+    id === "@peculiar/x509" ||
+    id === "@xmldom/xmldom" ||
+    id === "xpath" ||
+    id === "crypto" ||
+    id.startsWith("node:") ||
+    id.startsWith("@peculiar/asn1-")
+  );
+}
+
+function isExternalModuleUmd(id) {
   return id === "fflate" || id === "@peculiar/x509" || id === "crypto" || id.startsWith("node:");
 }
 
@@ -73,7 +85,7 @@ const rootUmdBuild = {
       target: "es2015",
     }),
   ],
-  external: isExternalModule,
+  external: isExternalModuleUmd,
 };
 
 export default [moduleBuild, rootUmdBuild];
