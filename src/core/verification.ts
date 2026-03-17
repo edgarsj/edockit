@@ -1455,7 +1455,7 @@ export async function verifySignature(
     options.verifyTimestamps === false ||
     (timestampResult?.isValid ?? true);
 
-  const isValid =
+  let isValid =
     certResult.isValid && checksumResult.isValid && signatureResult.isValid && timestampValid;
 
   // Determine validation status and limitations
@@ -1528,6 +1528,25 @@ export async function verifySignature(
       status = "INVALID";
       statusMessage = errors[0] || "Verification failed";
     }
+  }
+
+  // If everything else is valid but the issuer is not on the trusted list,
+  // downgrade from VALID to INDETERMINATE — crypto is sound but trust is unconfirmed
+  if (
+    status === "VALID" &&
+    options.trustListProvider &&
+    trustListMatch &&
+    (!trustListMatch.found || !trustListMatch.trustedAtTime)
+  ) {
+    status = "INDETERMINATE";
+    isValid = false;
+    statusMessage = trustListMatch.found
+      ? "Signer issuer found in trusted list but was not trusted at signing time"
+      : "Signer issuer not found in trusted list";
+    limitations.push({
+      code: "ISSUER_NOT_TRUSTED",
+      description: statusMessage,
+    });
   }
 
   const checklist = options.includeChecklist
