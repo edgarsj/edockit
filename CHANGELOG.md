@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-19
+
 ### Added
 
 - **Verification checklist output** - `verifySignature()` can now return a structured `checklist` with per-check status details when `includeChecklist: true`
@@ -16,11 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Compact trusted-list bundle format** - Added local matching against compact JSON bundles with a dedicated provider contract
 - **Public Node-only trusted-list builder** - Added `edockit/trusted-list/build` for generating app-hosted trusted-list JSON, along with the repository `npm run update-trusted-list` script
 
+### Changed
+
+- **Trust-list aware validation status** - When a `trustListProvider` is configured and the signer's issuer is not found or not trusted at signing time, overall status is now `INDETERMINATE` (previously `VALID`). Also downgrades to `INDETERMINATE` when the trust-list provider throws an error.
+- **ESM-compatible module builds** - `@xmldom/xmldom` and `xpath` are now externalized in ESM/CJS builds with proper `import` statements, fixing `"XML DOM parser not available"` errors in Node.js ESM consumers
+
 ### Fixed
 
 - **SignatureTimeStamp canonicalization** - Respect the timestamp's declared canonicalization method when hashing `ds:SignatureValue`, fixing false `coversSignature: false` results for some real samples
 - **Skip LDAP CRL distribution points** - Filter out non-HTTP(S) URLs from CRL distribution points to avoid failed fetch attempts on unsupported protocols like LDAP
 - **Timestamp trust-list evaluation** - Trusted-list verification now checks timestamp authorities at the timestamp signing time instead of only checking the signer issuer side
+- **TypeScript 5.9 compatibility** - Fix `Uint8Array`/`BufferSource` type errors in Web Crypto API calls
+- **Package security updates** - Update transitive dependencies to resolve vulnerabilities in rollup, minimatch, koa, basic-ftp, diff, qs, and brace-expansion
 
 ## [0.3.0] - 2026-01-04
 
@@ -104,7 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File checksum verification (SHA-256/384/512)
 - Browser and Node.js support
 
-[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/edgarsj/edockit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/edgarsj/edockit/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/edgarsj/edockit/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/edgarsj/edockit/compare/v0.2.2...v0.2.3

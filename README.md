@@ -108,14 +108,11 @@ Use these if you need direct RFC 3161 parsing or verification outside `verifySig
 - Return a structured verification checklist for consumer applications
 - Match both signer issuers and timestamp authorities against a trusted list through an explicit provider contract
 
-## Testing Status
+## Compatibility
 
-The library has been tested with a limited set of real Latvian eDoc files. More testing is still needed with:
+The library has been used in production to verify ASiC-E containers across a range of signature algorithms, certificate authorities, and vendor implementations.
 
-- ASiC-E containers from more EU countries
-- files produced by different vendor implementations
-- more signature algorithm and certificate variations
-- more edge cases and malformed samples
+If the library fails to parse a valid container or does not recognize a signature format, please [open an issue](https://github.com/edgarsj/edockit/issues) or contact [edocviewer@zenomy.tech](mailto:edocviewer@zenomy.tech) and attach the sample file (if it does not contain sensitive or personal data). Real-world samples from other EU and non-EU countries are especially helpful.
 
 ## Contributing
 
@@ -124,4 +121,3 @@ Contributions are welcome, especially:
 - real-world ASiC-E samples from different countries
 - bug reports with reproducible files when possible
 - interoperability fixes
-- documentation improvements
