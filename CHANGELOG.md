@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Lighter live revocation** - The issuer certificate required to build an OCSP request is now also resolved from certificates embedded in the signature's `RevocationValues` OCSP responses, and OCSP issuer resolution prefers a candidate that actually signed the certificate. When the container ships no certificate chain, this lets the small live OCSP query answer revocation instead of falling back to downloading the full CRL (verified end-to-end: `method: "ocsp"` instead of `"crl"` for the LV eID sample). The status in the embedded response is not trusted — a fresh OCSP query is still made
+- **Lighter live revocation** - The issuer certificate required to build an OCSP request is now also resolved from certificates embedded in the signature's `RevocationValues` OCSP responses, and OCSP issuer resolution requires a candidate whose key actually signed the certificate — a same-name certificate that did not issue it is rejected and the AIA lookup is used instead. When the container ships no certificate chain, this lets the small live OCSP query answer revocation instead of falling back to downloading the full CRL (verified end-to-end: `method: "ocsp"` instead of `"crl"` for the LV eID sample). The status in the embedded response is not trusted — a fresh OCSP query is still made
 - **Refreshed bundled EU trusted-list snapshot** - Regenerated from the EU LOTL with a fresh `generatedAt` and `bundleId`
 - **Declared direct dependencies** - `asn1js`, `@peculiar/asn1-schema`, and `@peculiar/asn1-x509` are now declared dependencies (previously relied on transitively)
 
