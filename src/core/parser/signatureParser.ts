@@ -282,6 +282,36 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     }
   }
 
+  // Extract embedded XAdES LTV revocation material (OCSP responses / CRLs) captured
+  // at signing time. This lets "not revoked at signing time" be answered offline.
+  let revocationValues: { ocsp: string[]; crl: string[] } | undefined;
+  const revocationValuesEl = querySelector(xmlDoc, "xades\\:RevocationValues, RevocationValues");
+  if (revocationValuesEl) {
+    const ocsp: string[] = [];
+    const crl: string[] = [];
+    for (const el of querySelectorAll(
+      revocationValuesEl,
+      "xades\\:EncapsulatedOCSPValue, EncapsulatedOCSPValue",
+    )) {
+      const value = el.textContent?.replace(/\s+/g, "");
+      if (value) {
+        ocsp.push(value);
+      }
+    }
+    for (const el of querySelectorAll(
+      revocationValuesEl,
+      "xades\\:EncapsulatedCRLValue, EncapsulatedCRLValue",
+    )) {
+      const value = el.textContent?.replace(/\s+/g, "");
+      if (value) {
+        crl.push(value);
+      }
+    }
+    if (ocsp.length > 0 || crl.length > 0) {
+      revocationValues = { ocsp, crl };
+    }
+  }
+
   if (certificate) {
     certificatePEM = formatPEM(certificate);
 
@@ -375,6 +405,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     signedInfoXml,
     canonicalizationMethod,
     signatureTimestamp,
+    revocationValues,
   };
 }
 

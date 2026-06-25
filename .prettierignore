@@ -1,3 +1,7 @@
 dist
 node_modules
 coverage
+
+# Generated trusted-list snapshot (single-line JSON payloads, not hand-edited)
+src/data/trusted-list.ts
+src/data/trusted-list.json

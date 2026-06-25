@@ -1,14 +1,28 @@
 // src/core/revocation/crl.ts
 
 import { X509Certificate, X509Crl, CRLDistributionPointsExtension } from "@peculiar/x509";
+import { AsnParser } from "@peculiar/asn1-schema";
+import { CertificateList } from "@peculiar/asn1-x509";
+import { fromBER } from "asn1js";
 import { RevocationResult } from "./types";
 import { fetchCRL } from "./fetch";
-import { arrayBufferToBase64 } from "../../utils/encoding";
+import { arrayBufferToBase64, base64ToArrayBuffer } from "../../utils/encoding";
 
 /**
  * OID for CRL Distribution Points extension
  */
 const id_ce_cRLDistributionPoints = "2.5.29.31";
+
+/**
+ * Upper bound on ASN.1 nodes when parsing large CRLs.
+ *
+ * asn1js enforces a DoS guard (DEFAULT_MAX_NODES = 10000) that rejects national
+ * CRLs with tens of thousands of revoked entries (e.g. the Latvian LV eID ICA
+ * CRL has ~13k entries -> well over 10k nodes). @peculiar/x509's X509Crl does not
+ * expose the limit, so the large-CRL fallback in parseCRL() raises it here while
+ * still keeping a realistic ceiling so a maliciously huge CRL is rejected.
+ */
+const MAX_CRL_ASN1_NODES = 5_000_000;
 
 /**
  * Extract CRL distribution point URLs from certificate
@@ -81,6 +95,50 @@ export function isSerialInCRL(
 }
 
 /**
+ * Convert CRL bytes to a DER ArrayBuffer, decoding from PEM if necessary.
+ */
+function crlBytesToDer(data: ArrayBuffer): ArrayBuffer {
+  // Detect a PEM armor by inspecting the leading bytes ("-----BEGIN").
+  const head = new Uint8Array(data, 0, Math.min(data.byteLength, 16));
+  let prefix = "";
+  for (const byte of head) {
+    prefix += String.fromCharCode(byte);
+  }
+
+  if (prefix.includes("-----BEGIN")) {
+    const pem = new TextDecoder().decode(data);
+    const base64 = pem
+      .replace(/-----BEGIN[^-]+-----/g, "")
+      .replace(/-----END[^-]+-----/g, "")
+      .replace(/\s+/g, "");
+    return base64ToArrayBuffer(base64);
+  }
+
+  return data;
+}
+
+/**
+ * Parse a large CRL that exceeds asn1js's default node cap.
+ *
+ * X509Crl's constructor parses with asn1js defaults, so we decode the DER
+ * ourselves with a raised (but bounded) node limit and then hand the already
+ * decoded structure to X509Crl, which accepts a CertificateList directly.
+ */
+function parseLargeCRL(data: ArrayBuffer): X509Crl | null {
+  try {
+    const der = crlBytesToDer(data);
+    const asn1 = fromBER(der, { maxNodes: MAX_CRL_ASN1_NODES });
+    if (asn1.offset === -1 || !asn1.result) {
+      return null;
+    }
+    const certList = AsnParser.fromASN(asn1.result, CertificateList);
+    return new X509Crl(certList);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse CRL from DER or PEM data
  * @param data CRL data (DER or PEM)
  * @returns X509Crl or null if parsing fails
@@ -97,7 +155,8 @@ export function parseCRL(data: ArrayBuffer): X509Crl | null {
       const pem = `-----BEGIN X509 CRL-----\n${lines.join("\n")}\n-----END X509 CRL-----`;
       return new X509Crl(pem);
     } catch {
-      return null;
+      // National CRLs can exceed asn1js's default node cap; retry with a raised limit.
+      return parseLargeCRL(data);
     }
   }
 }

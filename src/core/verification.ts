@@ -1266,6 +1266,10 @@ export async function verifySignature(
       const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
         certificateChain: signatureInfo.certificateChain,
         ...options.revocationOptions,
+        // Prefer embedded LTV material, evaluated at the trusted signing time.
+        embeddedOCSP: signatureInfo.revocationValues?.ocsp,
+        embeddedCRL: signatureInfo.revocationValues?.crl,
+        atTime: trustedSigningTime,
       });
 
       certResult.revocation = revocationResult;

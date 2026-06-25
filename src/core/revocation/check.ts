@@ -4,6 +4,7 @@ import { X509Certificate } from "@peculiar/x509";
 import { RevocationResult, RevocationCheckOptions, DEFAULT_REVOCATION_OPTIONS } from "./types";
 import { checkOCSP } from "./ocsp";
 import { checkCRL } from "./crl";
+import { checkRevocationFromEmbedded } from "./embedded";
 
 /**
  * Check certificate revocation status using OCSP (primary) and CRL (fallback)
@@ -41,6 +42,23 @@ export async function checkCertificateRevocation(
       reason: `Failed to parse certificate: ${error instanceof Error ? error.message : String(error)}`,
       checkedAt: now,
     };
+  }
+
+  // Prefer embedded XAdES LTV material (OCSP/CRL captured at signing time).
+  // This is offline, tiny, and answers "not revoked at signing time" directly,
+  // instead of a live fetch of today's status.
+  if (options.embeddedOCSP?.length || options.embeddedCRL?.length) {
+    const embeddedResult = checkRevocationFromEmbedded(
+      x509Cert,
+      { ocsp: options.embeddedOCSP, crl: options.embeddedCRL },
+      options.atTime ?? now,
+    );
+    if (
+      embeddedResult &&
+      (embeddedResult.status === "good" || embeddedResult.status === "revoked")
+    ) {
+      return embeddedResult;
+    }
   }
 
   // Track results from attempted methods

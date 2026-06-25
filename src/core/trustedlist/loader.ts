@@ -134,10 +134,29 @@ function sortCompactServices(left: CompactTrustedService, right: CompactTrustedS
   return leftKey.localeCompare(rightKey);
 }
 
+/**
+ * Derive a stable, filesystem/URL-safe bundle id from a generatedAt timestamp,
+ * e.g. "2026-06-25T18:30:00.000Z" -> "2026-06-25T18-30-00Z".
+ */
+export function formatTrustedListBundleId(generatedAt: string): string {
+  const parsedDate = new Date(generatedAt);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new Error(`Invalid trusted-list generatedAt timestamp "${generatedAt}"`);
+  }
+
+  return parsedDate
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z")
+    .replace(/:/g, "-");
+}
+
 export function createEmptyTrustedListBundle(): CompactTrustedListBundle {
+  const generatedAt = new Date(0).toISOString();
   return {
     v: 2,
-    generatedAt: new Date(0).toISOString(),
+    bundleId: formatTrustedListBundleId(generatedAt),
+    generatedAt,
     sources: [],
     dns: [],
     services: [],
@@ -166,6 +185,7 @@ export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedL
 
   return {
     version: bundle.v,
+    bundleId: bundle.bundleId ?? formatTrustedListBundleId(bundle.generatedAt),
     generatedAt: bundle.generatedAt,
     sources: bundle.sources.map(([id, label, lotlUrl]) => ({
       id,
@@ -241,10 +261,52 @@ export function buildCompactTrustedListBundle(
 
   return {
     v: 2,
+    bundleId: formatTrustedListBundleId(generatedAt),
     generatedAt,
     sources: sources.map((source) => [source.id, source.label, source.lotlUrl]),
     dns,
     services: Array.from(compactServiceMap.values()).sort(sortCompactServices),
+  };
+}
+
+/**
+ * Carry forward last-known-good services for territories (countries) that are
+ * entirely absent from a freshly fetched bundle. National trusted-list endpoints
+ * are frequently unreachable (timeouts, TLS failures, WAF blocks), and dropping a
+ * whole country on a transient fetch failure would silently revoke trust for its
+ * QTSPs. A territory present in the fresh bundle always wins (so genuine removals
+ * within a reachable TSL are still honored); only fully-missing territories are
+ * back-filled from the previous snapshot.
+ */
+export function mergeForwardUnreachableTerritories(
+  fresh: CompactTrustedListBundle,
+  previous: CompactTrustedListBundle,
+): CompactTrustedListBundle {
+  const freshTerritories = new Set(fresh.services.map((service) => service[3]));
+  const carriedServices = previous.services.filter((service) => !freshTerritories.has(service[3]));
+
+  if (carriedServices.length === 0) {
+    return fresh;
+  }
+
+  const dns = [...fresh.dns];
+  const dnIndex = new Map(dns.map((dn, index) => [dn, index]));
+
+  const remappedServices = carriedServices.map<CompactTrustedService>((service) => {
+    const subjectDn = previous.dns[service[2]];
+    let index = dnIndex.get(subjectDn);
+    if (index === undefined) {
+      index = dns.length;
+      dns.push(subjectDn);
+      dnIndex.set(subjectDn, index);
+    }
+    return [service[0], service[1], index, service[3], service[4], service[5]];
+  });
+
+  return {
+    ...fresh,
+    dns,
+    services: [...fresh.services, ...remappedServices].sort(sortCompactServices),
   };
 }
 

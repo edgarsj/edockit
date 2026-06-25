@@ -44,4 +44,16 @@ export interface SignatureInfo {
   canonicalizationMethod?: string; // The canonicalization method used
   /** RFC 3161 timestamp token (base64 encoded) from xades:EncapsulatedTimeStamp */
   signatureTimestamp?: string;
+  /**
+   * Embedded XAdES long-term validation (LTV) revocation material captured at
+   * signing time, from xades:UnsignedSignatureProperties/xades:RevocationValues.
+   * Values are base64-encoded DER. Used to evaluate "not revoked at signing time"
+   * offline, without a live OCSP/CRL fetch.
+   */
+  revocationValues?: {
+    /** base64-encoded DER OCSP responses (xades:OCSPValues/EncapsulatedOCSPValue) */
+    ocsp: string[];
+    /** base64-encoded DER CRLs (xades:CRLValues/EncapsulatedCRLValue) */
+    crl: string[];
+  };
 }

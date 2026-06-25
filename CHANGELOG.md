@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Embedded LTV revocation evaluation** - `verifySignature()` now answers "certificate not revoked at signing time" offline from the signature's embedded `xades:RevocationValues` (OCSP/CRL captured at signing time) before any live OCSP/CRL fetch, using the trusted timestamp time as the evaluation moment. Embedded material is exposed on `SignatureInfo.revocationValues`, and results carry `RevocationResult.fromEmbedded`
+- **Trusted-list bundle identifier** - Compact trusted-list bundles and the bundled snapshot now carry a top-level `bundleId` (derived from `generatedAt`) so downstream consumers can identify a snapshot (previously `null`)
+- **Resilient trusted-list regeneration** - `npm run update-trusted-list` carries forward last-known-good services for any territory whose national TSL endpoint is unreachable, so a transient fetch failure can no longer silently drop a country, and falls back to Node's native http(s) client for endpoints that block undici's client fingerprint (e.g. Estonia's `sr.riik.ee`)
+
+### Changed
+
+- **Refreshed bundled EU trusted-list snapshot** - Regenerated from the EU LOTL with a fresh `generatedAt` and `bundleId`
+- **Declared direct dependencies** - `asn1js`, `@peculiar/asn1-schema`, and `@peculiar/asn1-x509` are now declared dependencies (previously relied on transitively)
+
+### Fixed
+
+- **Large national CRL parsing** - `parseCRL()` now parses CRLs that exceed asn1js's default `DEFAULT_MAX_NODES` (10000) DoS guard (e.g. the ~13k-entry Latvian LV eID CRL) by re-parsing with a raised, bounded node limit. Fixes `certificate_not_revoked_at_signing_time` returning `INDETERMINATE` with "Failed to parse CRL data" against `asn1js@^3.0.9`
+- **InclusiveNamespaces XPath warning** - Node XPath queries now resolve namespace prefixes via `xpath.useNamespaces` instead of misusing `xpath.select`'s third (`single`) argument as a resolver, eliminating noisy "XPath evaluation failed" errors during signature parsing
+
 ## [0.4.0] - 2026-03-19
 
 ### Added

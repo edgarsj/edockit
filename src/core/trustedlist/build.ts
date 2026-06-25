@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DEFAULT_TRUSTED_LIST_SOURCES, fetchTrustedListBundle } from "./index";
+import { formatTrustedListBundleId } from "./loader";
 import type {
   CompactTrustedListBundle,
   TrustedListBundleManifest,
   TrustedListFetchOptions,
   TrustedListSource,
 } from "./types";
+
+// Re-exported for backwards compatibility; the canonical definition lives in loader.ts.
+export { formatTrustedListBundleId };
 
 const DEFAULT_TRUSTED_LIST_BASE_URL = "/trusted-list";
 
@@ -51,19 +55,6 @@ function normalizeBaseUrl(baseUrl: string): string {
   const withLeadingSlash =
     trimmedBaseUrl.startsWith("/") || isAbsoluteUrl ? trimmedBaseUrl : `/${trimmedBaseUrl}`;
   return withLeadingSlash.replace(/\/+$/g, "");
-}
-
-export function formatTrustedListBundleId(generatedAt: string): string {
-  const parsedDate = new Date(generatedAt);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    throw new Error(`Invalid trusted-list generatedAt timestamp "${generatedAt}"`);
-  }
-
-  return parsedDate
-    .toISOString()
-    .replace(/\.\d{3}Z$/, "Z")
-    .replace(/:/g, "-");
 }
 
 export function renderTrustedListJson(
