@@ -6,6 +6,7 @@ import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/X
 import { SignatureInfo } from "./parser";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
+import { extractCertsFromOCSPResponses } from "./revocation/ocsp";
 import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
@@ -1263,8 +1264,15 @@ export async function verifySignature(
   // Check certificate revocation (default: enabled)
   if (options.checkRevocation !== false && certResult.isValid) {
     try {
+      // Certificates carried inside embedded OCSP responses are a useful source of
+      // the issuer cert, letting the lightweight live OCSP query succeed (and
+      // avoiding a full CRL download) when the container's chain is empty.
+      const revocationChain = [
+        ...(signatureInfo.certificateChain ?? []),
+        ...extractCertsFromOCSPResponses(signatureInfo.revocationValues?.ocsp ?? []),
+      ];
       const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
-        certificateChain: signatureInfo.certificateChain,
+        certificateChain: revocationChain.length > 0 ? revocationChain : undefined,
         ...options.revocationOptions,
       });
 

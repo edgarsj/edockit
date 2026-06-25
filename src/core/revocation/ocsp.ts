@@ -15,7 +15,12 @@ import { AlgorithmIdentifier, Certificate } from "@peculiar/asn1-x509";
 import { OctetString } from "@peculiar/asn1-schema";
 import { RevocationResult } from "./types";
 import { fetchOCSP, fetchIssuerCertificate } from "./fetch";
-import { arrayBufferToBase64, arrayBufferToPEM, hexToArrayBuffer } from "../../utils/encoding";
+import {
+  arrayBufferToBase64,
+  arrayBufferToPEM,
+  base64ToArrayBuffer,
+  hexToArrayBuffer,
+} from "../../utils/encoding";
 
 /**
  * OID for Authority Information Access extension
@@ -104,6 +109,85 @@ export function findIssuerInChain(cert: X509Certificate, chain: string[]): X509C
   }
 
   return null;
+}
+
+/**
+ * Extract any certificates carried inside embedded OCSP responses.
+ *
+ * OCSP responses frequently bundle the responder certificate and the issuer CA
+ * certificate. They are a useful offline source of the issuer certificate needed
+ * to build a (live) OCSP request when the container's certificate chain is empty.
+ *
+ * @param base64Responses Base64-encoded DER OCSP responses (from RevocationValues)
+ * @returns PEM-encoded certificates found in the responses
+ */
+export function extractCertsFromOCSPResponses(base64Responses: string[]): string[] {
+  const pems: string[] = [];
+
+  for (const base64Response of base64Responses) {
+    try {
+      const response = AsnConvert.parse(base64ToArrayBuffer(base64Response), OCSPResponse);
+      if (!response.responseBytes) {
+        continue;
+      }
+      const basicResponse = AsnConvert.parse(
+        response.responseBytes.response.buffer,
+        BasicOCSPResponse,
+      );
+      for (const certificate of basicResponse.certs ?? []) {
+        try {
+          const x509 = new X509Certificate(new Uint8Array(AsnConvert.serialize(certificate)));
+          pems.push(x509.toString("pem"));
+        } catch {
+          // Skip certificates that fail to parse
+        }
+      }
+    } catch {
+      // Skip responses that fail to parse
+    }
+  }
+
+  return pems;
+}
+
+/**
+ * Resolve the issuer certificate for a cert from a candidate chain, preferring a
+ * candidate whose key actually signed the cert. This avoids building an OCSP
+ * request against the wrong (e.g. tampered, same-name) issuer.
+ *
+ * @param cert Certificate to find the issuer for
+ * @param chain Candidate certificates (PEM)
+ * @returns The verified issuer certificate, or the best name match, or null
+ */
+export async function resolveIssuerFromChain(
+  cert: X509Certificate,
+  chain: string[],
+): Promise<X509Certificate | null> {
+  const nameMatches: X509Certificate[] = [];
+  for (const pemCert of chain) {
+    try {
+      const candidate = new X509Certificate(pemCert);
+      if (candidate.subject === cert.issuer) {
+        nameMatches.push(candidate);
+      }
+    } catch {
+      // Skip invalid certificates
+    }
+  }
+
+  // Prefer a candidate that actually issued the certificate.
+  for (const candidate of nameMatches) {
+    try {
+      if (await cert.verify({ publicKey: candidate, signatureOnly: true })) {
+        return candidate;
+      }
+    } catch {
+      // Verification not possible for this candidate; try the next.
+    }
+  }
+
+  // Fall back to the first name match (best effort).
+  return nameMatches[0] ?? null;
 }
 
 /**
@@ -362,8 +446,9 @@ export async function checkOCSP(
   // Try to find issuer certificate
   let issuer = issuerCert;
   if (!issuer) {
-    // Try certificate chain first
-    issuer = findIssuerInChain(cert, certificateChain);
+    // Try the certificate chain first (prefer a candidate that actually issued the
+    // cert). The chain may include certs recovered from embedded OCSP responses.
+    issuer = await resolveIssuerFromChain(cert, certificateChain);
   }
   if (!issuer) {
     // Try AIA extension
