@@ -408,6 +408,12 @@ export async function parseTrustedList(
 ): Promise<TrustedService[]> {
   const document = parseXmlDocument(xml);
   const rootElement = getDocumentElement(document);
+  const rootLocalName = rootElement?.localName || rootElement?.nodeName.split(":").pop();
+  if (rootLocalName !== "TrustServiceStatusList") {
+    throw new Error(
+      `Expected TrustServiceStatusList root element, received "${rootLocalName || "none"}"`,
+    );
+  }
   const schemeInformation = getChildElement(rootElement, "SchemeInformation");
   const country = getChildText(schemeInformation, "SchemeTerritory") || context.territoryHint || "";
   const providerList = getChildElement(rootElement, "TrustServiceProviderList");

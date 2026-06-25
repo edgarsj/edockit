@@ -40,8 +40,8 @@ export const DEFAULT_TRUSTED_LIST_SOURCES: TrustedListSource[] = [
 export interface TrustedListFetchDiagnostics {
   /**
    * Territories whose advertised TSL endpoints were all attempted and all
-   * failed to fetch. Successful-but-empty or successfully parsed removals are
-   * deliberately excluded.
+   * failed to fetch or parse. Valid empty TSLs and successfully parsed removals
+   * are deliberately excluded.
    */
   unreachableTerritories: string[];
 }
@@ -88,11 +88,11 @@ function isProbablyXmlDocument(xml: string): boolean {
 }
 
 function collectUnreachableTerritories(
-  tslDocuments: Array<{ pointer: TslPointer; xml: string | null }>,
+  tslDocuments: Array<{ pointer: TslPointer; parsed: boolean }>,
 ): string[] {
   const fetchesByTerritory = new Map<string, { attempted: number; succeeded: number }>();
 
-  for (const { pointer, xml } of tslDocuments) {
+  for (const { pointer, parsed } of tslDocuments) {
     const territory = pointer.territory?.trim().toUpperCase();
     if (!territory) {
       continue;
@@ -103,7 +103,7 @@ function collectUnreachableTerritories(
       succeeded: 0,
     };
     fetches.attempted += 1;
-    if (xml !== null) {
+    if (parsed) {
       fetches.succeeded += 1;
     }
     fetchesByTerritory.set(territory, fetches);
@@ -118,24 +118,27 @@ function collectUnreachableTerritories(
 async function parseTrustedListWithWarnings(
   xml: string,
   context: { source: TrustedListSource; territoryHint?: string; url: string },
-): Promise<TrustedService[]> {
+): Promise<{ parsed: boolean; services: TrustedService[] }> {
   if (!isProbablyXmlDocument(xml)) {
     console.warn(
       `Trusted-list parse warning for "${context.url}": response does not look like XML`,
     );
-    return [];
+    return { parsed: false, services: [] };
   }
 
   try {
-    return await parseTrustedList(xml, {
-      source: context.source,
-      territoryHint: context.territoryHint,
-    });
+    return {
+      parsed: true,
+      services: await parseTrustedList(xml, {
+        source: context.source,
+        territoryHint: context.territoryHint,
+      }),
+    };
   } catch (error) {
     console.warn(
       `Trusted-list parse warning for "${context.url}": ${error instanceof Error ? error.message : String(error)}`,
     );
-    return [];
+    return { parsed: false, services: [] };
   }
 }
 
@@ -179,23 +182,21 @@ export async function fetchTrustedListBundleWithDiagnostics(
       xml: await fetchXmlWithWarnings(pointer.url, fetchOptions),
     })),
   );
-  const availableTslDocuments = tslDocuments.filter(
-    (document): document is { pointer: (typeof pointers)[number]; xml: string } =>
-      Boolean(document.xml),
+  const parsedTslDocuments = await Promise.all(
+    tslDocuments.map(async ({ pointer, xml }) => ({
+      pointer,
+      ...(xml === null
+        ? { parsed: false, services: [] }
+        : await parseTrustedListWithWarnings(xml, {
+            source: pointer.source,
+            territoryHint: pointer.territory,
+            url: pointer.url,
+          })),
+    })),
   );
-  const unreachableTerritories = collectUnreachableTerritories(tslDocuments);
+  const unreachableTerritories = collectUnreachableTerritories(parsedTslDocuments);
 
-  const extractedServices = (
-    await Promise.all(
-      availableTslDocuments.map(({ pointer, xml }) =>
-        parseTrustedListWithWarnings(xml, {
-          source: pointer.source,
-          territoryHint: pointer.territory,
-          url: pointer.url,
-        }),
-      ),
-    )
-  ).flat();
+  const extractedServices = parsedTslDocuments.flatMap(({ services }) => services);
 
   if (extractedServices.length === 0) {
     throw new Error("Trusted-list update fetched LOTL data but extracted no trusted services");

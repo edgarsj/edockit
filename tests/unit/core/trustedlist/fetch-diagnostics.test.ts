@@ -63,6 +63,14 @@ describe("trusted-list fetch diagnostics", () => {
             <TSLLocation>https://example.test/lt.xml</TSLLocation>
             <SchemeTerritory>LT</SchemeTerritory>
           </OtherTSLPointer>
+          <OtherTSLPointer>
+            <TSLLocation>https://example.test/pl.xml</TSLLocation>
+            <SchemeTerritory>PL</SchemeTerritory>
+          </OtherTSLPointer>
+          <OtherTSLPointer>
+            <TSLLocation>https://example.test/fi.xml</TSLLocation>
+            <SchemeTerritory>FI</SchemeTerritory>
+          </OtherTSLPointer>
         </PointersToOtherTSL>
       </TrustServiceStatusList>
     `;
@@ -106,6 +114,14 @@ describe("trusted-list fetch diagnostics", () => {
         // removal; it must not be classified as unreachable.
         return new Response("<TrustServiceStatusList />", { status: 200 });
       }
+      if (url.endsWith("/pl.xml")) {
+        // HTTP 200 error pages are not successful TSL parses.
+        return new Response("<html><body>temporary error</body></html>", { status: 200 });
+      }
+      if (url.endsWith("/fi.xml")) {
+        // Malformed TSL XML must also count as an endpoint failure.
+        return new Response("<TrustServiceStatusList><SchemeInformation>", { status: 200 });
+      }
       if (url.endsWith("/ee-primary.xml")) {
         return new Response("unavailable", { status: 503 });
       }
@@ -118,6 +134,6 @@ describe("trusted-list fetch diagnostics", () => {
     const result = await fetchTrustedListBundleWithDiagnostics([SOURCE]);
 
     expect(result.bundle.services.some((service) => service[3] === "LV")).toBe(true);
-    expect(result.diagnostics.unreachableTerritories).toEqual(["EE"]);
+    expect(result.diagnostics.unreachableTerritories).toEqual(["EE", "FI", "PL"]);
   });
 });
