@@ -44,4 +44,20 @@ export interface SignatureInfo {
   canonicalizationMethod?: string; // The canonicalization method used
   /** RFC 3161 timestamp token (base64 encoded) from xades:EncapsulatedTimeStamp */
   signatureTimestamp?: string;
+  /**
+   * Raw embedded XAdES revocation material from
+   * xades:UnsignedSignatureProperties/xades:RevocationValues, as base64-encoded DER.
+   *
+   * NOTE: these values are exposed as-is and are NOT validated by edockit. They live
+   * in unsigned signature properties, so unless they are protected by a verified XAdES
+   * archive timestamp they are not authenticated and MUST NOT be trusted as a
+   * revocation verdict on their own. Verifying them requires checking the OCSP/CRL
+   * signature against a trusted issuer and enforcing freshness.
+   */
+  revocationValues?: {
+    /** base64-encoded DER OCSP responses (xades:OCSPValues/EncapsulatedOCSPValue) */
+    ocsp: string[];
+    /** base64-encoded DER CRLs (xades:CRLValues/EncapsulatedCRLValue) */
+    crl: string[];
+  };
 }

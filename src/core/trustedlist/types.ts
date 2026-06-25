@@ -80,6 +80,8 @@ export interface TrustedListIndexes {
 
 export interface TrustedListData {
   version: number;
+  /** Stable identifier for this snapshot, derived from generatedAt. */
+  bundleId?: string;
   generatedAt: string;
   sources: TrustedListSource[];
   services: TrustedListEntry[];
@@ -126,6 +128,8 @@ export type CompactTrustedListSource = [id: string, label: string, lotlUrl: stri
 
 export interface CompactTrustedListBundle {
   v: 2;
+  /** Stable identifier for this snapshot, derived from generatedAt. */
+  bundleId?: string;
   generatedAt: string;
   sources: CompactTrustedListSource[];
   dns: string[];

@@ -141,12 +141,15 @@ export function queryByXPath(
     // Node.js environment with xpath module
     else {
       const xpathLib = xpath;
-      const nsResolver = createNsResolverForNode(namespaces);
 
       // Use a try-catch here to handle specific XPath issues
       try {
-        const nodes = xpathLib.select(xpathExpression, parent as any, nsResolver) as any;
-        return nodes.length > 0 ? nodes[0] : null;
+        // useNamespaces returns a select function that resolves prefixes (e.g. ec:)
+        // and always returns a node array. (xpath.select's 3rd arg is `single`, not a
+        // resolver, so passing the namespace map there silently breaks results.)
+        const selectWithNs = xpathLib.useNamespaces(namespaces);
+        const nodes = selectWithNs(xpathExpression, parent as any) as Node[];
+        return nodes.length > 0 ? (nodes[0] as Element) : null;
       } catch (err: unknown) {
         // If we get a namespace error, try a simpler XPath with just local-name()
         if (
@@ -215,11 +218,14 @@ export function queryAllByXPath(
     // Node.js environment with xpath module
     else {
       const xpathLib = xpath;
-      const nsResolver = createNsResolverForNode(namespaces);
 
       // Use a try-catch here to handle specific XPath issues
       try {
-        const nodes = xpathLib.select(xpathExpression, parent as any, nsResolver) as any;
+        // useNamespaces returns a select function that resolves prefixes (e.g. ec:)
+        // and always returns a node array. (xpath.select's 3rd arg is `single`, not a
+        // resolver, so passing the namespace map there silently breaks results.)
+        const selectWithNs = xpathLib.useNamespaces(namespaces);
+        const nodes = selectWithNs(xpathExpression, parent as any) as Node[];
         return nodes as Element[];
       } catch (err: unknown) {
         // If we get a namespace error, try a simpler XPath with just local-name()
@@ -256,13 +262,6 @@ function createNsResolverForBrowser(namespaces: NamespaceMap): XPathNSResolver {
     if (prefix === null) return null;
     return namespaces[prefix] || null;
   };
-}
-
-/**
- * Helper function to create a namespace resolver for Node.js environments
- */
-function createNsResolverForNode(namespaces: NamespaceMap): any {
-  return namespaces;
 }
 
 /**

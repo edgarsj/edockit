@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Embedded XAdES RevocationValues exposed** - `SignatureInfo.revocationValues` exposes the raw embedded OCSP/CRL material (base64 DER) from `xades:UnsignedSignatureProperties`. These properties are unsigned, so edockit does **not** use them as a revocation verdict; they are provided for consumers performing their own authenticated long-term validation
+- **Trusted-list bundle identifier** - Compact trusted-list bundles and the bundled snapshot now carry a top-level `bundleId` (derived from `generatedAt`) so downstream consumers can identify a snapshot (previously `null`)
+- **Resilient trusted-list regeneration** - `npm run update-trusted-list` carries forward last-known-good services only when every advertised TSL endpoint for a territory explicitly fails to fetch or parse, so transient failures and HTTP 200 error pages cannot silently drop a country while valid empty TSLs and successful removals are not resurrected; it also falls back to Node's native http(s) client for endpoints that block undici's client fingerprint (e.g. Estonia's `sr.riik.ee`)
+
+### Changed
+
+- **Lighter live revocation** - The issuer certificate required to build an OCSP request is now also resolved from certificates embedded in the signature's `RevocationValues` OCSP responses, and OCSP issuer resolution requires a candidate whose key actually signed the certificate — a same-name certificate that did not issue it is rejected and the AIA lookup is used instead. When the container ships no certificate chain, this lets the small live OCSP query answer revocation instead of falling back to downloading the full CRL (verified end-to-end: `method: "ocsp"` instead of `"crl"` for the LV eID sample). The status in the embedded response is not trusted — a fresh OCSP query is still made
+- **Refreshed bundled EU trusted-list snapshot** - Regenerated from the EU LOTL with a fresh `generatedAt` and `bundleId`
+- **Declared direct dependencies** - `asn1js`, `@peculiar/asn1-schema`, and `@peculiar/asn1-x509` are now declared dependencies (previously relied on transitively)
+
+### Fixed
+
+- **Per-signature XAdES properties** - `parseSignatureElement` now reads `RevocationValues`, `CertificateValues`, `SigningTime`, and `SignatureTimeStamp` from the current signature element instead of document-wide, so a signature in a multi-signature document no longer inherits the first signature's embedded material (which would point OCSP issuer resolution at the wrong certs)
+- **Large national CRL parsing** - `parseCRL()` now parses CRLs that exceed asn1js's default `DEFAULT_MAX_NODES` (10000) DoS guard (e.g. the ~13k-entry Latvian LV eID CRL) by re-parsing with a raised, bounded node limit. Fixes `certificate_not_revoked_at_signing_time` returning `INDETERMINATE` with "Failed to parse CRL data" against `asn1js@^3.0.9`
+- **InclusiveNamespaces XPath warning** - Node XPath queries now resolve namespace prefixes via `xpath.useNamespaces` instead of misusing `xpath.select`'s third (`single`) argument as a resolver, eliminating noisy "XPath evaluation failed" errors during signature parsing
+
 ## [0.4.0] - 2026-03-19
 
 ### Added

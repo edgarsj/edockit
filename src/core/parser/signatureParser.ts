@@ -192,7 +192,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   let signatureTimestampCanonicalizationMethod: string | undefined;
   let signatureTimestampInclusiveNamespacePrefixList: string[] | undefined;
   const signatureTimestampElement = querySelector(
-    xmlDoc,
+    signatureElement,
     "xades\\:SignatureTimeStamp, SignatureTimeStamp",
   );
   if (signatureTimestampElement) {
@@ -264,7 +264,10 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   }
 
   // Also look for XAdES CertificateValues (contains full chain excluding signer)
-  const certValues = querySelector(xmlDoc, "xades\\:CertificateValues, CertificateValues");
+  const certValues = querySelector(
+    signatureElement,
+    "xades\\:CertificateValues, CertificateValues",
+  );
   if (certValues) {
     const encapsulatedCerts = querySelectorAll(
       certValues,
@@ -279,6 +282,39 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
           certificateChain.push(chainPEM);
         }
       }
+    }
+  }
+
+  // Extract embedded XAdES LTV revocation material (OCSP responses / CRLs) captured
+  // at signing time. This lets "not revoked at signing time" be answered offline.
+  let revocationValues: { ocsp: string[]; crl: string[] } | undefined;
+  const revocationValuesEl = querySelector(
+    signatureElement,
+    "xades\\:RevocationValues, RevocationValues",
+  );
+  if (revocationValuesEl) {
+    const ocsp: string[] = [];
+    const crl: string[] = [];
+    for (const el of querySelectorAll(
+      revocationValuesEl,
+      "xades\\:EncapsulatedOCSPValue, EncapsulatedOCSPValue",
+    )) {
+      const value = el.textContent?.replace(/\s+/g, "");
+      if (value) {
+        ocsp.push(value);
+      }
+    }
+    for (const el of querySelectorAll(
+      revocationValuesEl,
+      "xades\\:EncapsulatedCRLValue, EncapsulatedCRLValue",
+    )) {
+      const value = el.textContent?.replace(/\s+/g, "");
+      if (value) {
+        crl.push(value);
+      }
+    }
+    if (ocsp.length > 0 || crl.length > 0) {
+      revocationValues = { ocsp, crl };
     }
   }
 
@@ -308,7 +344,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   }
 
   // Get signing time
-  const signingTimeElement = querySelector(xmlDoc, "xades\\:SigningTime, SigningTime");
+  const signingTimeElement = querySelector(signatureElement, "xades\\:SigningTime, SigningTime");
   const signingTime =
     signingTimeElement && signingTimeElement.textContent
       ? new Date(signingTimeElement.textContent.trim())
@@ -375,6 +411,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     signedInfoXml,
     canonicalizationMethod,
     signatureTimestamp,
+    revocationValues,
   };
 }
 
