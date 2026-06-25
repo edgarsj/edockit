@@ -45,10 +45,14 @@ export interface SignatureInfo {
   /** RFC 3161 timestamp token (base64 encoded) from xades:EncapsulatedTimeStamp */
   signatureTimestamp?: string;
   /**
-   * Embedded XAdES long-term validation (LTV) revocation material captured at
-   * signing time, from xades:UnsignedSignatureProperties/xades:RevocationValues.
-   * Values are base64-encoded DER. Used to evaluate "not revoked at signing time"
-   * offline, without a live OCSP/CRL fetch.
+   * Raw embedded XAdES revocation material from
+   * xades:UnsignedSignatureProperties/xades:RevocationValues, as base64-encoded DER.
+   *
+   * NOTE: these values are exposed as-is and are NOT validated by edockit. They live
+   * in unsigned signature properties, so unless they are protected by a verified XAdES
+   * archive timestamp they are not authenticated and MUST NOT be trusted as a
+   * revocation verdict on their own. Verifying them requires checking the OCSP/CRL
+   * signature against a trusted issuer and enforcing freshness.
    */
   revocationValues?: {
     /** base64-encoded DER OCSP responses (xades:OCSPValues/EncapsulatedOCSPValue) */

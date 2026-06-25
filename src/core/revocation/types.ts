@@ -16,11 +16,6 @@ export interface RevocationResult {
   revokedAt?: Date;
   /** When this revocation check was performed */
   checkedAt: Date;
-  /**
-   * True when the result came from embedded XAdES LTV material (OCSP/CRL captured
-   * at signing time) rather than a live OCSP/CRL fetch.
-   */
-  fromEmbedded?: boolean;
 }
 
 /**
@@ -38,21 +33,6 @@ export interface RevocationCheckOptions {
   /** Certificate chain for finding issuer (PEM strings) */
   certificateChain?: string[];
   /**
-   * Embedded XAdES OCSP responses (base64-encoded DER) captured at signing time.
-   * Tried before any live OCSP/CRL fetch so revocation can be evaluated offline.
-   */
-  embeddedOCSP?: string[];
-  /**
-   * Embedded XAdES CRLs (base64-encoded DER) captured at signing time.
-   * Tried (after embedded OCSP) before any live fetch.
-   */
-  embeddedCRL?: string[];
-  /**
-   * Evaluation moment for revocation ("at signing time"), typically the trusted
-   * timestamp time. Used when checking embedded material. Defaults to now.
-   */
-  atTime?: Date;
-  /**
    * CORS proxy URL for browser environments.
    * When set, all OCSP/CRL fetch requests will be routed through this proxy.
    * The original URL will be URL-encoded and appended as a query parameter.
@@ -65,10 +45,7 @@ export interface RevocationCheckOptions {
  * Default options for revocation checking
  */
 export const DEFAULT_REVOCATION_OPTIONS: Required<
-  Omit<
-    RevocationCheckOptions,
-    "certificateChain" | "proxyUrl" | "embeddedOCSP" | "embeddedCRL" | "atTime"
-  >
+  Omit<RevocationCheckOptions, "certificateChain" | "proxyUrl">
 > = {
   ocspEnabled: true,
   crlEnabled: true,
