@@ -157,7 +157,7 @@ export function extractCertsFromOCSPResponses(base64Responses: string[]): string
  *
  * @param cert Certificate to find the issuer for
  * @param chain Candidate certificates (PEM)
- * @returns The verified issuer certificate, or the best name match, or null
+ * @returns The verified issuer certificate, or null
  */
 export async function resolveIssuerFromChain(
   cert: X509Certificate,
@@ -186,8 +186,9 @@ export async function resolveIssuerFromChain(
     }
   }
 
-  // Fall back to the first name match (best effort).
-  return nameMatches[0] ?? null;
+  // A same-name certificate with the wrong key must not suppress the safer AIA
+  // lookup. Only return a candidate that cryptographically issued the cert.
+  return null;
 }
 
 /**

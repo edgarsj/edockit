@@ -8,6 +8,7 @@ import {
 } from "./loader";
 import type {
   CompactTrustedListBundle,
+  TslPointer,
   TrustedListData,
   TrustedListFetchOptions,
   TrustedListSource,
@@ -35,6 +36,20 @@ export const DEFAULT_TRUSTED_LIST_SOURCES: TrustedListSource[] = [
     lotlUrl: "https://ec.europa.eu/tools/lotl/mra/ades-lotl.xml",
   },
 ];
+
+export interface TrustedListFetchDiagnostics {
+  /**
+   * Territories whose advertised TSL endpoints were all attempted and all
+   * failed to fetch. Successful-but-empty or successfully parsed removals are
+   * deliberately excluded.
+   */
+  unreachableTerritories: string[];
+}
+
+export interface TrustedListFetchResult {
+  bundle: CompactTrustedListBundle;
+  diagnostics: TrustedListFetchDiagnostics;
+}
 
 async function fetchXml(url: string, options: TrustedListFetchOptions = {}): Promise<string> {
   const result = await fetchBinary(url, {
@@ -72,6 +87,34 @@ function isProbablyXmlDocument(xml: string): boolean {
   return trimmed.startsWith("<");
 }
 
+function collectUnreachableTerritories(
+  tslDocuments: Array<{ pointer: TslPointer; xml: string | null }>,
+): string[] {
+  const fetchesByTerritory = new Map<string, { attempted: number; succeeded: number }>();
+
+  for (const { pointer, xml } of tslDocuments) {
+    const territory = pointer.territory?.trim().toUpperCase();
+    if (!territory) {
+      continue;
+    }
+
+    const fetches = fetchesByTerritory.get(territory) ?? {
+      attempted: 0,
+      succeeded: 0,
+    };
+    fetches.attempted += 1;
+    if (xml !== null) {
+      fetches.succeeded += 1;
+    }
+    fetchesByTerritory.set(territory, fetches);
+  }
+
+  return [...fetchesByTerritory.entries()]
+    .filter(([, fetches]) => fetches.attempted > 0 && fetches.succeeded === 0)
+    .map(([territory]) => territory)
+    .sort();
+}
+
 async function parseTrustedListWithWarnings(
   xml: string,
   context: { source: TrustedListSource; territoryHint?: string; url: string },
@@ -102,12 +145,15 @@ async function parseTrustedListWithWarnings(
  * Primarily intended for Node.js build/update tooling. Browser callers generally
  * need a proxy and should prefer the higher-level trusted-list update flow.
  */
-export async function fetchTrustedListBundle(
+export async function fetchTrustedListBundleWithDiagnostics(
   sources: TrustedListSource[] = DEFAULT_TRUSTED_LIST_SOURCES,
   fetchOptions: TrustedListFetchOptions = {},
-): Promise<CompactTrustedListBundle> {
+): Promise<TrustedListFetchResult> {
   if (sources.length === 0) {
-    return createEmptyTrustedListBundle();
+    return {
+      bundle: createEmptyTrustedListBundle(),
+      diagnostics: { unreachableTerritories: [] },
+    };
   }
 
   const lotlDocuments = await Promise.all(
@@ -137,6 +183,7 @@ export async function fetchTrustedListBundle(
     (document): document is { pointer: (typeof pointers)[number]; xml: string } =>
       Boolean(document.xml),
   );
+  const unreachableTerritories = collectUnreachableTerritories(tslDocuments);
 
   const extractedServices = (
     await Promise.all(
@@ -154,11 +201,22 @@ export async function fetchTrustedListBundle(
     throw new Error("Trusted-list update fetched LOTL data but extracted no trusted services");
   }
 
-  return buildCompactTrustedListBundle(
-    dedupeTrustedServices(extractedServices),
-    sources,
-    new Date().toISOString(),
-  );
+  return {
+    bundle: buildCompactTrustedListBundle(
+      dedupeTrustedServices(extractedServices),
+      sources,
+      new Date().toISOString(),
+    ),
+    diagnostics: { unreachableTerritories },
+  };
+}
+
+export async function fetchTrustedListBundle(
+  sources: TrustedListSource[] = DEFAULT_TRUSTED_LIST_SOURCES,
+  fetchOptions: TrustedListFetchOptions = {},
+): Promise<CompactTrustedListBundle> {
+  const result = await fetchTrustedListBundleWithDiagnostics(sources, fetchOptions);
+  return result.bundle;
 }
 
 export async function updateTrustedList(

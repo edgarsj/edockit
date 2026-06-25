@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_TRUSTED_LIST_SOURCES,
-  fetchTrustedListBundle,
+  fetchTrustedListBundleWithDiagnostics,
   mergeForwardUnreachableTerritories,
 } from "../src/core/trustedlist/index.ts";
 import { buildTrustedListManifest, renderTrustedListJson } from "../src/core/trustedlist/build.ts";
@@ -34,29 +34,28 @@ async function main() {
   // Some national TSL endpoints block undici's fingerprint (returning 403) but
   // accept Node's native http(s) client; fall back to it so coverage stays fresh.
   const restoreFetch = installNativeFetchFallback();
-  let freshBundle;
+  let fetchResult;
   try {
-    freshBundle = await fetchTrustedListBundle(DEFAULT_TRUSTED_LIST_SOURCES);
+    fetchResult = await fetchTrustedListBundleWithDiagnostics(DEFAULT_TRUSTED_LIST_SOURCES);
   } finally {
     restoreFetch();
   }
+  const { bundle: freshBundle, diagnostics } = fetchResult;
+  const unreachableTerritories = new Set(diagnostics.unreachableTerritories);
 
-  // Don't regress coverage when a national TSL endpoint was unreachable this run:
-  // carry forward last-known-good services for any fully-missing territory.
+  // Don't regress coverage when every advertised endpoint for a territory was
+  // unreachable. Successfully fetched removals remain removed.
   const previousBundle = await loadPreviousBundle(jsonOutputPath);
   const bundle = previousBundle
-    ? mergeForwardUnreachableTerritories(freshBundle, previousBundle)
+    ? mergeForwardUnreachableTerritories(freshBundle, previousBundle, unreachableTerritories)
     : freshBundle;
 
   if (previousBundle) {
     const freshTerritories = new Set(freshBundle.services.map((service) => service[3]));
-    const carriedTerritories = [
-      ...new Set(
-        previousBundle.services
-          .map((service) => service[3])
-          .filter((territory) => !freshTerritories.has(territory)),
-      ),
-    ].sort();
+    const previousTerritories = new Set(previousBundle.services.map((service) => service[3]));
+    const carriedTerritories = diagnostics.unreachableTerritories.filter(
+      (territory) => previousTerritories.has(territory) && !freshTerritories.has(territory),
+    );
     if (carriedTerritories.length > 0) {
       console.warn(
         `Carried forward last-known-good services for unreachable territories: ${carriedTerritories.join(", ")}`,

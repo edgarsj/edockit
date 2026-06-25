@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { X509Certificate } from "@peculiar/x509";
+import { X509Certificate, X509CertificateGenerator } from "@peculiar/x509";
 import { parseEdoc } from "../../../../src/core/parser";
 import {
   extractCertsFromOCSPResponses,
@@ -33,5 +33,33 @@ describe("OCSP issuer resolution from embedded data", () => {
 
   it("returns null when no candidate matches the issuer name", async () => {
     expect(await resolveIssuerFromChain(signer, [])).toBeNull();
+  });
+
+  it("rejects a same-name certificate that did not issue the signer", async () => {
+    const keys = await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 1024,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const impostor = await X509CertificateGenerator.createSelfSigned({
+      serialNumber: "01",
+      name: signer.issuer,
+      notBefore: new Date("2020-01-01T00:00:00Z"),
+      notAfter: new Date("2030-01-01T00:00:00Z"),
+      keys,
+      signingAlgorithm: {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256",
+      },
+    });
+
+    expect(impostor.subject).toBe(signer.issuer);
+    expect(await signer.verify({ publicKey: impostor, signatureOnly: true })).toBe(false);
+    expect(await resolveIssuerFromChain(signer, [impostor.toString("pem")])).toBeNull();
   });
 });

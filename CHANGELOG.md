@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Embedded XAdES RevocationValues exposed** - `SignatureInfo.revocationValues` exposes the raw embedded OCSP/CRL material (base64 DER) from `xades:UnsignedSignatureProperties`. These properties are unsigned, so edockit does **not** use them as a revocation verdict; they are provided for consumers performing their own authenticated long-term validation
 - **Trusted-list bundle identifier** - Compact trusted-list bundles and the bundled snapshot now carry a top-level `bundleId` (derived from `generatedAt`) so downstream consumers can identify a snapshot (previously `null`)
-- **Resilient trusted-list regeneration** - `npm run update-trusted-list` carries forward last-known-good services for any territory whose national TSL endpoint is unreachable, so a transient fetch failure can no longer silently drop a country, and falls back to Node's native http(s) client for endpoints that block undici's client fingerprint (e.g. Estonia's `sr.riik.ee`)
+- **Resilient trusted-list regeneration** - `npm run update-trusted-list` carries forward last-known-good services only when every advertised TSL endpoint for a territory explicitly fails, so transient fetch failures cannot silently drop a country while successful removals are not resurrected; it also falls back to Node's native http(s) client for endpoints that block undici's client fingerprint (e.g. Estonia's `sr.riik.ee`)
 
 ### Changed
 

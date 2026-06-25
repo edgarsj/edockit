@@ -270,20 +270,22 @@ export function buildCompactTrustedListBundle(
 }
 
 /**
- * Carry forward last-known-good services for territories (countries) that are
- * entirely absent from a freshly fetched bundle. National trusted-list endpoints
- * are frequently unreachable (timeouts, TLS failures, WAF blocks), and dropping a
- * whole country on a transient fetch failure would silently revoke trust for its
- * QTSPs. A territory present in the fresh bundle always wins (so genuine removals
- * within a reachable TSL are still honored); only fully-missing territories are
- * back-filled from the previous snapshot.
+ * Carry forward last-known-good services only for territories whose advertised
+ * TSL endpoints were explicitly observed as unreachable during this fetch.
+ *
+ * A territory merely being absent from the fresh bundle is not sufficient:
+ * absence can represent a legitimate removal and must not resurrect stale trust.
+ * A territory present in the fresh bundle always wins.
  */
 export function mergeForwardUnreachableTerritories(
   fresh: CompactTrustedListBundle,
   previous: CompactTrustedListBundle,
+  unreachableTerritories: ReadonlySet<string>,
 ): CompactTrustedListBundle {
   const freshTerritories = new Set(fresh.services.map((service) => service[3]));
-  const carriedServices = previous.services.filter((service) => !freshTerritories.has(service[3]));
+  const carriedServices = previous.services.filter(
+    (service) => unreachableTerritories.has(service[3]) && !freshTerritories.has(service[3]),
+  );
 
   if (carriedServices.length === 0) {
     return fresh;
