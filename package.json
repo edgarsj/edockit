@@ -71,6 +71,10 @@
     "ts-jest": "^29.2.6",
     "typescript": "^5.8.2"
   },
+  "overrides": {
+    "esbuild": "^0.28.1",
+    "js-yaml": "^4.2.0"
+  },
   "module": "dist/index.esm.js",
   "browser": "dist/index.umd.js",
   "types": "dist/index.d.ts",

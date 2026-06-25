@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Large national CRL parsing** - `parseCRL()` now parses CRLs that exceed asn1js's default `DEFAULT_MAX_NODES` (10000) DoS guard (e.g. the ~13k-entry Latvian LV eID CRL) by re-parsing with a raised, bounded node limit. Fixes `certificate_not_revoked_at_signing_time` returning `INDETERMINATE` with "Failed to parse CRL data" against `asn1js@^3.0.9`
 - **InclusiveNamespaces XPath warning** - Node XPath queries now resolve namespace prefixes via `xpath.useNamespaces` instead of misusing `xpath.select`'s third (`single`) argument as a resolver, eliminating noisy "XPath evaluation failed" errors during signature parsing
 
+### Security
+
+- **Dependency advisory cleanup** - Updated the only affected runtime dependency, `@xmldom/xmldom`, to 0.9.10 (resolves high-severity XML injection and serialization DoS advisories) and cleared all remaining `npm audit` findings in the dev/test toolchain via in-range bumps and `esbuild`/`js-yaml` overrides. `npm audit` now reports 0 vulnerabilities
+
 ## [0.4.0] - 2026-03-19
 
 ### Added
