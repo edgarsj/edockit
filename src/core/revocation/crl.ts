@@ -1,17 +1,34 @@
 // src/core/revocation/crl.ts
 
-import { X509Certificate, X509Crl, CRLDistributionPointsExtension } from "@peculiar/x509";
+import {
+  X509Certificate,
+  X509Crl,
+  CRLDistributionPointsExtension,
+  KeyUsageFlags,
+  KeyUsagesExtension,
+} from "@peculiar/x509";
 import { AsnParser } from "@peculiar/asn1-schema";
 import { CertificateList } from "@peculiar/asn1-x509";
 import { fromBER } from "asn1js";
-import { RevocationResult } from "./types";
-import { fetchCRL } from "./fetch";
+import { RevocationResult, MAX_URLS_PER_CERTIFICATE, REVOCATION_CLOCK_SKEW_MS } from "./types";
+import { fetchCRL, DEFAULT_MAX_CRL_BYTES } from "./fetch";
+import { resolveIssuerCertificate } from "./ocsp";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "../../utils/encoding";
 
 /**
  * OID for CRL Distribution Points extension
  */
 const id_ce_cRLDistributionPoints = "2.5.29.31";
+
+/**
+ * OID for Key Usage extension
+ */
+const id_ce_keyUsage = "2.5.29.15";
+
+/**
+ * OID for Delta CRL Indicator extension
+ */
+const id_ce_deltaCRLIndicator = "2.5.29.27";
 
 /**
  * Upper bound on ASN.1 nodes when parsing large CRLs.
@@ -52,7 +69,8 @@ export function extractCRLUrls(cert: X509Certificate): string[] {
             if (gn.uniformResourceIdentifier) {
               const url = gn.uniformResourceIdentifier;
               // Only include HTTP(S) URLs - skip LDAP and other protocols
-              if (url.startsWith("http://") || url.startsWith("https://")) {
+              const lower = url.toLowerCase();
+              if (lower.startsWith("http://") || lower.startsWith("https://")) {
                 urls.push(url);
               }
             }
@@ -162,20 +180,91 @@ export function parseCRL(data: ArrayBuffer): X509Crl | null {
 }
 
 /**
+ * Options for validating a CRL
+ */
+export interface CRLValidationOptions {
+  /** Time to validate against (default: now) */
+  now?: Date;
+  /** Allowed clock difference in ms (default: REVOCATION_CLOCK_SKEW_MS) */
+  clockSkewMs?: number;
+}
+
+/**
+ * Validate that a CRL was issued by `issuer` for `cert` and is current.
+ *
+ * Checks the issuer name, the CRL signature against the issuer key, the
+ * issuer's cRLSign key usage (when a key usage extension is present), and
+ * thisUpdate/nextUpdate. Delta CRLs are not supported.
+ *
+ * @returns null when the CRL is usable, otherwise a reason
+ */
+export async function validateCRL(
+  crl: X509Crl,
+  cert: X509Certificate,
+  issuer: X509Certificate,
+  options: CRLValidationOptions = {},
+): Promise<string | null> {
+  const now = (options.now ?? new Date()).getTime();
+  const skewMs = options.clockSkewMs ?? REVOCATION_CLOCK_SKEW_MS;
+
+  if (crl.issuer !== cert.issuer || crl.issuer !== issuer.subject) {
+    return "CRL issuer does not match the certificate issuer";
+  }
+
+  const keyUsage = issuer.getExtension(id_ce_keyUsage) as KeyUsagesExtension | null;
+  if (keyUsage && (keyUsage.usages & KeyUsageFlags.cRLSign) === 0) {
+    return "Issuer certificate is not allowed to sign CRLs";
+  }
+
+  if (crl.getExtension(id_ce_deltaCRLIndicator)) {
+    return "Delta CRLs are not supported";
+  }
+
+  let signatureOk = false;
+  try {
+    signatureOk = await crl.verify({ publicKey: issuer.publicKey });
+  } catch {
+    signatureOk = false;
+  }
+  if (!signatureOk) {
+    return "CRL signature does not verify with the issuer key";
+  }
+
+  if (crl.thisUpdate.getTime() > now + skewMs) {
+    return "CRL thisUpdate is in the future";
+  }
+  if (!crl.nextUpdate) {
+    return "CRL has no nextUpdate";
+  }
+  if (crl.nextUpdate.getTime() < now - skewMs) {
+    return `CRL is stale (nextUpdate ${crl.nextUpdate.toISOString()})`;
+  }
+
+  return null;
+}
+
+/**
  * Check certificate revocation via CRL
  * @param cert Certificate to check
- * @param options CRL check options
+ * @param options CRL check options. The issuer certificate is needed to verify
+ *   the CRL; if not supplied it is resolved from `certificateChain` or AIA.
  * @returns Revocation result
  */
 export async function checkCRL(
   cert: X509Certificate,
-  options: { timeout?: number; proxyUrl?: string } = {},
+  options: {
+    timeout?: number;
+    proxyUrl?: string;
+    issuerCertificate?: X509Certificate | null;
+    certificateChain?: string[];
+    maxBytes?: number;
+  } = {},
 ): Promise<RevocationResult> {
-  const { timeout = 10000, proxyUrl } = options;
+  const { timeout = 10000, proxyUrl, certificateChain, maxBytes = DEFAULT_MAX_CRL_BYTES } = options;
   const now = new Date();
 
   // Get CRL URLs
-  const crlUrls = extractCRLUrls(cert);
+  const crlUrls = extractCRLUrls(cert).slice(0, MAX_URLS_PER_CERTIFICATE);
   if (crlUrls.length === 0) {
     return {
       isValid: false,
@@ -186,12 +275,26 @@ export async function checkCRL(
     };
   }
 
+  const issuer =
+    options.issuerCertificate ??
+    (await resolveIssuerCertificate(cert, { certificateChain, timeout, proxyUrl }));
+  if (!issuer) {
+    return {
+      isValid: false,
+      status: "unknown",
+      method: "crl",
+      reason: "Could not find or fetch issuer certificate to verify the CRL",
+      checkedAt: now,
+    };
+  }
+
   // Try each CRL URL
   const errors: string[] = [];
+  let validationProblem = false;
 
   for (const url of crlUrls) {
     try {
-      const result = await fetchCRL(url, timeout, proxyUrl);
+      const result = await fetchCRL(url, timeout, proxyUrl, maxBytes);
 
       if (!result.ok || !result.data) {
         errors.push(`${url}: ${result.error || "Failed to fetch"}`);
@@ -202,6 +305,13 @@ export async function checkCRL(
       const crl = parseCRL(result.data);
       if (!crl) {
         errors.push(`${url}: Failed to parse CRL data`);
+        continue;
+      }
+
+      const problem = await validateCRL(crl, cert, issuer);
+      if (problem) {
+        validationProblem = true;
+        errors.push(`${url}: ${problem}`);
         continue;
       }
 
@@ -222,7 +332,7 @@ export async function checkCRL(
         };
       }
 
-      // Certificate not in CRL = good
+      // Certificate not in a verified, current CRL = good
       return {
         isValid: true,
         status: "good",
@@ -237,7 +347,7 @@ export async function checkCRL(
   // All CRL checks failed
   return {
     isValid: false,
-    status: "error",
+    status: validationProblem ? "unknown" : "error",
     method: "crl",
     reason: `All CRL checks failed: ${errors.join("; ")}`,
     checkedAt: now,

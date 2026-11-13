@@ -2,8 +2,8 @@
 
 import { X509Certificate } from "@peculiar/x509";
 import { RevocationResult, RevocationCheckOptions, DEFAULT_REVOCATION_OPTIONS } from "./types";
-import { checkOCSP } from "./ocsp";
-import { checkCRL } from "./crl";
+import { checkOCSP, extractOCSPUrls, resolveIssuerCertificate } from "./ocsp";
+import { checkCRL, extractCRLUrls } from "./crl";
 
 /**
  * Check certificate revocation status using OCSP (primary) and CRL (fallback)
@@ -47,13 +47,40 @@ export async function checkCertificateRevocation(
   let ocspResult: RevocationResult | null = null;
   let crlResult: RevocationResult | null = null;
 
+  // The issuer certificate is needed to build OCSP requests and to verify OCSP
+  // responses and CRLs. Resolve it once, only if a method will use it.
+  let issuerLookup: Promise<X509Certificate | null> | undefined;
+  const getIssuer = () => {
+    if (!issuerLookup) {
+      issuerLookup = resolveIssuerCertificate(x509Cert, {
+        certificateChain: opts.certificateChain,
+        timeout: opts.ocspTimeout,
+        proxyUrl: options.proxyUrl,
+      });
+    }
+    return issuerLookup;
+  };
+  const issuerUnavailable = (method: "ocsp" | "crl"): RevocationResult => ({
+    isValid: false,
+    status: "unknown",
+    method,
+    reason: "Could not find or fetch issuer certificate",
+    checkedAt: now,
+  });
+
   // Try OCSP first
   if (opts.ocspEnabled) {
-    ocspResult = await checkOCSP(x509Cert, null, {
-      timeout: opts.ocspTimeout,
-      certificateChain: opts.certificateChain,
-      proxyUrl: options.proxyUrl,
-    });
+    const hasOcspUrls = extractOCSPUrls(x509Cert).length > 0;
+    const issuer = hasOcspUrls ? await getIssuer() : null;
+    ocspResult =
+      hasOcspUrls && !issuer
+        ? issuerUnavailable("ocsp")
+        : await checkOCSP(x509Cert, issuer, {
+            timeout: opts.ocspTimeout,
+            certificateChain: opts.certificateChain,
+            proxyUrl: options.proxyUrl,
+            maxBytes: opts.ocspMaxBytes,
+          });
 
     // If OCSP gives a definitive answer (good or revoked), use it
     if (ocspResult.status === "good" || ocspResult.status === "revoked") {
@@ -65,10 +92,17 @@ export async function checkCertificateRevocation(
 
   // Try CRL
   if (opts.crlEnabled) {
-    crlResult = await checkCRL(x509Cert, {
-      timeout: opts.crlTimeout,
-      proxyUrl: options.proxyUrl,
-    });
+    const hasCrlUrls = extractCRLUrls(x509Cert).length > 0;
+    const issuer = hasCrlUrls ? await getIssuer() : null;
+    crlResult =
+      hasCrlUrls && !issuer
+        ? issuerUnavailable("crl")
+        : await checkCRL(x509Cert, {
+            timeout: opts.crlTimeout,
+            proxyUrl: options.proxyUrl,
+            issuerCertificate: issuer,
+            maxBytes: opts.crlMaxBytes,
+          });
 
     // If CRL gives a definitive answer, use it
     if (crlResult.status === "good" || crlResult.status === "revoked") {

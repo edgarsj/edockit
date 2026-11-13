@@ -39,6 +39,10 @@ export interface RevocationCheckOptions {
    * Example: "https://cors-proxy.example.com/?url="
    */
   proxyUrl?: string;
+  /** Maximum CRL download size in bytes (default: 10 MB) */
+  crlMaxBytes?: number;
+  /** Maximum OCSP response size in bytes (default: 1 MB) */
+  ocspMaxBytes?: number;
 }
 
 /**
@@ -51,7 +55,20 @@ export const DEFAULT_REVOCATION_OPTIONS: Required<
   crlEnabled: true,
   ocspTimeout: 5000,
   crlTimeout: 10000,
+  crlMaxBytes: 10 * 1024 * 1024,
+  ocspMaxBytes: 1024 * 1024,
 };
+
+/**
+ * Maximum number of OCSP, CRL or CA Issuers URLs tried per certificate.
+ * URLs come from the certificate itself, so the number of requests is bounded.
+ */
+export const MAX_URLS_PER_CERTIFICATE = 3;
+
+/**
+ * Allowed clock difference when checking OCSP/CRL validity times (ms)
+ */
+export const REVOCATION_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * OID constants for certificate extensions
