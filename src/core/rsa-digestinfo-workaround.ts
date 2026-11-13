@@ -10,6 +10,10 @@
  * Web Crypto API's subtle.verify() is strict and rejects the non-standard format.
  * This module provides a fallback that manually performs RSA verification using
  * BigInt math, which works in both browser and Node.js environments.
+ *
+ * The recovered block must be well-formed PKCS#1 v1.5 type 1 padding followed by
+ * exactly one of the two encodings above for the expected hash algorithm and value.
+ * Any other content (different OID, extra or missing bytes) is rejected.
  */
 
 /**
@@ -153,43 +157,72 @@ function extractDigestInfoFromPKCS1(decrypted: Uint8Array): Uint8Array | null {
 }
 
 /**
- * Extract hash from DigestInfo structure
- * Handles both standard (with NULL) and non-standard (without NULL) formats
+ * DER-encoded OBJECT IDENTIFIER contents for the supported hash algorithms
  */
-function extractHashFromDigestInfo(
-  digestInfo: Uint8Array,
-  expectedHashLength: number,
-): Uint8Array | null {
-  // DigestInfo ::= SEQUENCE { digestAlgorithm AlgorithmIdentifier, digest OCTET STRING }
-  // Look for OCTET STRING tag (0x04) followed by the hash
-  for (let i = 0; i < digestInfo.length - 1; i++) {
-    if (digestInfo[i] === 0x04) {
-      const len = digestInfo[i + 1];
-      if (len === expectedHashLength && i + 2 + len <= digestInfo.length) {
-        return digestInfo.slice(i + 2, i + 2 + len);
-      }
-    }
-  }
-  return null;
+const HASH_ALGORITHM_OIDS: Record<string, number[]> = {
+  sha1: [0x2b, 0x0e, 0x03, 0x02, 0x1a],
+  sha256: [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01],
+  sha384: [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02],
+  sha512: [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03],
+};
+
+/**
+ * Normalize a hash algorithm name ("SHA-256", "sha256", ...) to a lookup key
+ */
+function normalizeHashName(hashAlgorithm: string): string {
+  return hashAlgorithm.toLowerCase().replace(/-/g, "");
 }
 
 /**
- * Get hash length in bytes for a given algorithm
+ * Build the DER encoding of DigestInfo for the given hash.
+ *
+ * DigestInfo ::= SEQUENCE {
+ *   digestAlgorithm AlgorithmIdentifier,  -- SEQUENCE { OID, NULL (optional) }
+ *   digest OCTET STRING
+ * }
+ *
+ * All supported encodings are shorter than 128 bytes, so short-form lengths suffice.
  */
-function getHashLength(hashAlgorithm: string): number {
-  const algo = hashAlgorithm.toLowerCase().replace("-", "");
-  switch (algo) {
-    case "sha1":
-      return 20;
-    case "sha256":
-      return 32;
-    case "sha384":
-      return 48;
-    case "sha512":
-      return 64;
-    default:
-      return 32;
+function encodeDigestInfo(oid: number[], hash: Uint8Array, withNullParams: boolean): Uint8Array {
+  const algorithmId = [0x06, oid.length, ...oid];
+  if (withNullParams) {
+    algorithmId.push(0x05, 0x00);
   }
+  const algorithmSeq = [0x30, algorithmId.length, ...algorithmId];
+  const digest = [0x04, hash.length, ...hash];
+  return new Uint8Array([0x30, algorithmSeq.length + digest.length, ...algorithmSeq, ...digest]);
+}
+
+/**
+ * Compare two byte arrays without early exit on the first difference
+ */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff === 0;
+}
+
+/**
+ * Check that the recovered DigestInfo is exactly one of the accepted encodings
+ * for the expected hash: the standard DER form (with NULL parameters) or the
+ * legacy form without the NULL parameters. No other bytes may be present.
+ */
+function digestInfoMatches(
+  digestInfo: Uint8Array,
+  oid: number[],
+  expectedHash: Uint8Array,
+): boolean {
+  const standard = encodeDigestInfo(oid, expectedHash, true);
+  const withoutNull = encodeDigestInfo(oid, expectedHash, false);
+  // Evaluate both so timing does not depend on which form matched
+  const matchesStandard = bytesEqual(digestInfo, standard);
+  const matchesWithoutNull = bytesEqual(digestInfo, withoutNull);
+  return matchesStandard || matchesWithoutNull;
 }
 
 /**
@@ -225,6 +258,12 @@ export async function verifyRsaWithNonStandardDigestInfo(
   hashAlgorithm: string,
 ): Promise<boolean> {
   try {
+    const hashKey = normalizeHashName(hashAlgorithm);
+    const oid = HASH_ALGORITHM_OIDS[hashKey];
+    if (!oid) {
+      return false;
+    }
+
     let digestInfo: Uint8Array | null;
 
     if (isBrowser()) {
@@ -235,9 +274,16 @@ export async function verifyRsaWithNonStandardDigestInfo(
       }
 
       const { n, e } = keyParams;
+      if (n <= BigInt(0) || e <= BigInt(0)) {
+        return false;
+      }
       const keyLength = Math.ceil(n.toString(16).length / 2);
 
       const signatureInt = bytesToBigInt(signatureBytes);
+      // RSAVP1: the signature representative must be smaller than the modulus
+      if (signatureInt >= n) {
+        return false;
+      }
       const decryptedInt = modPow(signatureInt, e, n);
       const decrypted = bigIntToBytes(decryptedInt, keyLength);
 
@@ -258,7 +304,8 @@ export async function verifyRsaWithNonStandardDigestInfo(
         Buffer.from(signatureBytes),
       );
 
-      // Node's publicDecrypt already strips PKCS#1 padding, returns DigestInfo directly
+      // Node's publicDecrypt checks and strips the PKCS#1 v1.5 type 1 padding
+      // (00 01 FF..FF 00 with at least 8 FF bytes) and returns the DigestInfo directly
       digestInfo = new Uint8Array(decrypted);
     }
 
@@ -266,38 +313,23 @@ export async function verifyRsaWithNonStandardDigestInfo(
       return false;
     }
 
-    // Extract hash from DigestInfo (tolerates missing NULL)
-    const hashLength = getHashLength(hashAlgorithm);
-    const extractedHash = extractHashFromDigestInfo(digestInfo, hashLength);
-    if (!extractedHash) {
-      return false;
-    }
-
     // Compute expected hash
     let expectedHash: Uint8Array;
     if (isBrowser()) {
-      // Normalize to Web Crypto format: SHA-1, SHA-256, SHA-384, SHA-512
-      let hashName = hashAlgorithm.toUpperCase().replace(/-/g, "");
-      hashName = hashName.replace(/^SHA(\d)/, "SHA-$1");
+      // Web Crypto names: SHA-1, SHA-256, SHA-384, SHA-512
+      const hashName = hashKey.toUpperCase().replace(/^SHA(\d)/, "SHA-$1");
       const hashBuffer = await window.crypto.subtle.digest(hashName, new Uint8Array(dataToVerify));
       expectedHash = new Uint8Array(hashBuffer);
     } else {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const nodeCrypto = require("crypto");
-      const hashName = hashAlgorithm.toLowerCase().replace("-", "");
-      expectedHash = nodeCrypto.createHash(hashName).update(Buffer.from(dataToVerify)).digest();
+      expectedHash = new Uint8Array(
+        nodeCrypto.createHash(hashKey).update(Buffer.from(dataToVerify)).digest(),
+      );
     }
 
-    // Compare hashes (constant-time comparison)
-    if (extractedHash.length !== expectedHash.length) {
-      return false;
-    }
-    let diff = 0;
-    for (let i = 0; i < extractedHash.length; i++) {
-      diff |= extractedHash[i] ^ expectedHash[i];
-    }
-
-    return diff === 0;
+    // The recovered block must be exactly one of the accepted DigestInfo encodings
+    return digestInfoMatches(digestInfo, oid, expectedHash);
   } catch {
     return false;
   }
