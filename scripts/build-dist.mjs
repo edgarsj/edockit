@@ -34,6 +34,26 @@ function isExternalModuleUmd(id) {
   return id === "fflate" || id === "@peculiar/x509" || id === "crypto" || id.startsWith("node:");
 }
 
+/**
+ * Leave the trusted-list snapshot's text out of source maps; it is data and
+ * would otherwise roughly double the size of the published package.
+ */
+function stripTrustedListDataFromSourceMaps() {
+  return {
+    name: "strip-trusted-list-data-from-source-maps",
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type !== "chunk" || !file.map?.sourcesContent) {
+          continue;
+        }
+        file.map.sourcesContent = file.map.sourcesContent.map((content, index) =>
+          /src[\\/]data[\\/]trusted-list\.ts$/.test(file.map.sources[index]) ? null : content,
+        );
+      }
+    },
+  };
+}
+
 function createModuleBuildConfig() {
   return {
     input: {
@@ -43,7 +63,12 @@ function createModuleBuildConfig() {
       "trusted-list-bundled": "src/trusted-list-bundled.ts",
       "trusted-list-http": "src/trusted-list-http.ts",
     },
-    plugins: [resolve(), commonjs(), createTypescriptPlugin()],
+    plugins: [
+      resolve(),
+      commonjs(),
+      createTypescriptPlugin(),
+      stripTrustedListDataFromSourceMaps(),
+    ],
     external: isExternalModule,
     output: [
       {

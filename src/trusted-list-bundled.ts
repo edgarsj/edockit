@@ -1,1 +1,4 @@
-export { createBundledTrustListProvider } from "./core/trustedlist/bundled-provider";
+export {
+  createBundledTrustListProvider,
+  getBundledTrustedListBundle,
+} from "./core/trustedlist/bundled-provider";

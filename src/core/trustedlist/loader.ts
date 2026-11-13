@@ -1,7 +1,11 @@
 import type {
+  CompactQualificationElement,
+  CompactQualificationPeriod,
   CompactTrustedInterval,
   CompactTrustedListBundle,
   CompactTrustedService,
+  QualificationElement,
+  TrustedQualificationPeriod,
   TrustedListData,
   TrustedListEntry,
   TrustedListIndexes,
@@ -12,12 +16,20 @@ import type {
 } from "./types";
 import {
   base64UrlToHex,
+  getSpkiKey,
   getTrustListPurposeMaskForServiceType,
-  hexToBase64Url,
+  isQualifiedServiceStatus,
   isTrustedServiceStatus,
   normalizeDistinguishedName,
   normalizeHex,
+  SPKI_KEY_LENGTH,
 } from "./normalize";
+import {
+  ASI_FOR_ESEALS,
+  ASI_FOR_ESIGNATURES,
+  ASI_FOR_WEBSITE_AUTHENTICATION,
+  getAdditionalServiceInfoMask,
+} from "./qualifications";
 
 function addToIndex(
   index: Map<string, TrustedListEntry[]>,
@@ -45,13 +57,13 @@ function addToIndex(
 function buildIndexes(services: TrustedListEntry[]): TrustedListIndexes {
   const indexes: TrustedListIndexes = {
     bySki: new Map<string, TrustedListEntry[]>(),
-    bySpkiSha256: new Map<string, TrustedListEntry[]>(),
+    bySpkiKey: new Map<string, TrustedListEntry[]>(),
     bySubjectDn: new Map<string, TrustedListEntry[]>(),
   };
 
   for (const service of services) {
     addToIndex(indexes.bySki, normalizeHex(service.skiHex), service);
-    addToIndex(indexes.bySpkiSha256, normalizeHex(service.spkiSha256Hex), service);
+    addToIndex(indexes.bySpkiKey, service.spkiKey, service);
     addToIndex(indexes.bySubjectDn, service.subjectDn, service);
   }
 
@@ -154,41 +166,88 @@ export function formatTrustedListBundleId(generatedAt: string): string {
 export function createEmptyTrustedListBundle(): CompactTrustedListBundle {
   const generatedAt = new Date(0).toISOString();
   return {
-    v: 2,
+    v: 3,
     bundleId: formatTrustedListBundleId(generatedAt),
     generatedAt,
     sources: [],
     dns: [],
+    quals: [],
     services: [],
   };
 }
 
+function hydrateQualificationElement([
+  qualifiers,
+  criteria,
+]: CompactQualificationElement): QualificationElement {
+  return { qualifiers, criteria };
+}
+
+function hydrateQualificationPeriods(
+  periods: CompactQualificationPeriod[],
+  qualifications: QualificationElement[],
+): TrustedQualificationPeriod[] {
+  return periods.map(([fromUnix, toUnix, additionalServiceInfoMask, qualIdxs]) => ({
+    fromUnix,
+    toUnix,
+    forESignatures: (additionalServiceInfoMask & ASI_FOR_ESIGNATURES) !== 0,
+    forESeals: (additionalServiceInfoMask & ASI_FOR_ESEALS) !== 0,
+    forWebSiteAuthentication: (additionalServiceInfoMask & ASI_FOR_WEBSITE_AUTHENTICATION) !== 0,
+    qualifications: (qualIdxs ?? []).map((index) => {
+      const element = qualifications[index];
+      if (!element) {
+        throw new Error(`Trusted list bundle contains unknown qualification code ${index}`);
+      }
+      return element;
+    }),
+  }));
+}
+
+/**
+ * Hydrate a compact bundle (version 2 or 3) into indexed runtime data.
+ *
+ * Version 3 bundles are produced by `buildCompactTrustedListBundle`, which
+ * stores DNs already normalized, so they are used as-is.
+ */
 export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedListData {
+  const isV3 = bundle.v === 3;
+  const dns = isV3 ? bundle.dns : bundle.dns.map((dn) => normalizeDistinguishedName(dn));
+  const qualifications = (bundle.quals ?? []).map(hydrateQualificationElement);
+
   const services: TrustedListEntry[] = bundle.services.map((serviceRecord) => {
     const [
-      spkiSha256Base64Url,
+      spkiKey,
       skiBase64Url,
       subjectDnIdx,
       country,
       purposeMask,
       trustIntervals,
       sourceIdx,
+      qualificationPeriods,
     ] = serviceRecord;
     const source = sourceIdx !== undefined ? bundle.sources[sourceIdx] : undefined;
 
-    const subjectDn = bundle.dns[subjectDnIdx];
+    const subjectDn = dns[subjectDnIdx];
     if (subjectDn === undefined) {
       throw new Error(`Trusted list bundle contains unknown DN code ${subjectDnIdx}`);
     }
 
     return {
-      skiHex: base64UrlToHex(skiBase64Url),
-      spkiSha256Hex: base64UrlToHex(spkiSha256Base64Url),
-      subjectDn: normalizeDistinguishedName(subjectDn),
+      skiHex: isV3 ? null : base64UrlToHex(skiBase64Url),
+      spkiKey: spkiKey ? spkiKey.slice(0, SPKI_KEY_LENGTH) : null,
+      subjectDn,
       country,
       ...(source ? { source: source[0], sourceLabel: source[1] } : {}),
       purposeMask,
       trustIntervals: hydrateTrustIntervals(trustIntervals),
+      ...(isV3
+        ? {
+            qualificationPeriods: hydrateQualificationPeriods(
+              qualificationPeriods ?? [],
+              qualifications,
+            ),
+          }
+        : {}),
     };
   });
 
@@ -206,6 +265,103 @@ export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedL
   };
 }
 
+/**
+ * Sort periods and merge adjacent or overlapping ones that carry the same
+ * service information (consecutive history entries often differ only in their
+ * status date).
+ */
+function sortAndMergeQualificationPeriods(
+  periods: CompactQualificationPeriod[],
+): CompactQualificationPeriod[] {
+  const sorted = [...periods].sort(
+    (left, right) =>
+      left[0] - right[0] || JSON.stringify(left).localeCompare(JSON.stringify(right)),
+  );
+  const merged: CompactQualificationPeriod[] = [];
+
+  for (const period of sorted) {
+    const previous = merged[merged.length - 1];
+    const sameInformation =
+      previous &&
+      previous[2] === period[2] &&
+      JSON.stringify(previous[3] ?? []) === JSON.stringify(period[3] ?? []);
+    if (sameInformation && (previous[1] === null || period[0] <= previous[1])) {
+      previous[1] =
+        previous[1] === null || period[1] === null ? null : Math.max(previous[1], period[1]);
+      continue;
+    }
+    merged.push([...period] as CompactQualificationPeriod);
+  }
+
+  return merged;
+}
+
+class QualificationCodebook {
+  readonly entries: CompactQualificationElement[] = [];
+  private readonly indexByKey = new Map<string, number>();
+
+  add(element: CompactQualificationElement): number {
+    const key = JSON.stringify(element);
+    let index = this.indexByKey.get(key);
+    if (index === undefined) {
+      index = this.entries.length;
+      this.entries.push(element);
+      this.indexByKey.set(key, index);
+    }
+    return index;
+  }
+}
+
+function buildQualificationPeriods(
+  service: TrustedService,
+  codebook: QualificationCodebook,
+): CompactQualificationPeriod[] {
+  if (service.serviceType !== "CA/QC") {
+    return [];
+  }
+
+  return service.history
+    .filter((entry) => isQualifiedServiceStatus(entry.status))
+    .map<CompactQualificationPeriod>((entry) => {
+      const qualIdxs = [
+        ...new Set(
+          (entry.qualifications ?? []).map((element) =>
+            codebook.add([element.qualifiers, element.criteria]),
+          ),
+        ),
+      ].sort((left, right) => left - right);
+      return [
+        parseTimestampToUnixSeconds(entry.from),
+        entry.to ? parseTimestampToUnixSeconds(entry.to) : null,
+        getAdditionalServiceInfoMask(entry.additionalServiceInfo),
+        ...(qualIdxs.length > 0 ? [qualIdxs] : []),
+      ] as CompactQualificationPeriod;
+    });
+}
+
+function compactServiceRecord(
+  spkiKey: string | null,
+  subjectDnIdx: number,
+  country: string,
+  purposeMask: CompactTrustedService[4],
+  trustIntervals: CompactTrustedInterval[],
+  sourceIdx: number | undefined,
+  qualificationPeriods: CompactQualificationPeriod[],
+): CompactTrustedService {
+  const record: unknown[] = [spkiKey, null, subjectDnIdx, country, purposeMask, trustIntervals];
+  if (sourceIdx !== undefined || qualificationPeriods.length > 0) {
+    record.push(sourceIdx ?? -1);
+  }
+  if (qualificationPeriods.length > 0) {
+    record.push(qualificationPeriods);
+  }
+  return record as CompactTrustedService;
+}
+
+/**
+ * Build a version 3 compact bundle: SPKI lookup keys (see `getSpkiKey`), no
+ * SKIs, normalized DNs, and qualification data for CA/QC services.
+ */
 export function buildCompactTrustedListBundle(
   services: TrustedService[],
   sources: TrustedListSource[],
@@ -214,7 +370,19 @@ export function buildCompactTrustedListBundle(
   const dedupedServices = dedupeTrustedServices(services);
   const distinguishedNameCodebook = new Map<string, number>();
   const dns: string[] = [];
-  const compactServiceMap = new Map<string, CompactTrustedService>();
+  const codebook = new QualificationCodebook();
+  const compactServiceMap = new Map<
+    string,
+    {
+      spkiKey: string | null;
+      subjectDnIdx: number;
+      country: string;
+      purposeMask: CompactTrustedService[4];
+      trustIntervals: CompactTrustedInterval[];
+      sourceIdx: number | undefined;
+      qualificationPeriods: CompactQualificationPeriod[];
+    }
+  >();
   const sourceIndexById = new Map(sources.map((source, index) => [source.id, index]));
 
   const getDistinguishedNameCode = (value: string) => {
@@ -245,10 +413,11 @@ export function buildCompactTrustedListBundle(
       continue;
     }
 
+    const spkiKey = getSpkiKey(service.spkiSha256Hex);
     const sourceIdx = sourceIndexById.get(service.source);
+    const qualificationPeriods = buildQualificationPeriods(service, codebook);
     const compactServiceKey = JSON.stringify([
-      hexToBase64Url(service.spkiSha256Hex),
-      hexToBase64Url(service.skiHex),
+      spkiKey,
       subjectDn,
       service.country,
       trustIntervals,
@@ -257,28 +426,43 @@ export function buildCompactTrustedListBundle(
 
     const existingService = compactServiceMap.get(compactServiceKey);
     if (existingService) {
-      existingService[4] = (existingService[4] | purposeMask) as (typeof existingService)[4];
+      existingService.purposeMask = (existingService.purposeMask |
+        purposeMask) as CompactTrustedService[4];
+      existingService.qualificationPeriods.push(...qualificationPeriods);
       continue;
     }
 
-    compactServiceMap.set(compactServiceKey, [
-      hexToBase64Url(service.spkiSha256Hex),
-      hexToBase64Url(service.skiHex),
-      getDistinguishedNameCode(subjectDn),
-      service.country,
+    compactServiceMap.set(compactServiceKey, {
+      spkiKey,
+      subjectDnIdx: getDistinguishedNameCode(subjectDn),
+      country: service.country,
       purposeMask,
       trustIntervals,
-      ...(sourceIdx !== undefined ? [sourceIdx] : []),
-    ] as CompactTrustedService);
+      sourceIdx,
+      qualificationPeriods,
+    });
   }
 
   return {
-    v: 2,
+    v: 3,
     bundleId: formatTrustedListBundleId(generatedAt),
     generatedAt,
     sources: sources.map((source) => [source.id, source.label, source.lotlUrl]),
     dns,
-    services: Array.from(compactServiceMap.values()).sort(sortCompactServices),
+    quals: codebook.entries,
+    services: Array.from(compactServiceMap.values())
+      .map((service) =>
+        compactServiceRecord(
+          service.spkiKey,
+          service.subjectDnIdx,
+          service.country,
+          service.purposeMask,
+          service.trustIntervals,
+          service.sourceIdx,
+          sortAndMergeQualificationPeriods(service.qualificationPeriods),
+        ),
+      )
+      .sort(sortCompactServices),
   };
 }
 
@@ -289,12 +473,20 @@ export function buildCompactTrustedListBundle(
  * A territory merely being absent from the fresh bundle is not sufficient:
  * absence can represent a legitimate removal and must not resurrect stale trust.
  * A territory present in the fresh bundle always wins.
+ *
+ * Both bundles must be version 3 (as built by `buildCompactTrustedListBundle`);
+ * version 2 bundles lack the qualification data a version 3 bundle promises.
  */
 export function mergeForwardUnreachableTerritories(
   fresh: CompactTrustedListBundle,
   previous: CompactTrustedListBundle,
   unreachableTerritories: ReadonlySet<string>,
 ): CompactTrustedListBundle {
+  if (fresh.v !== 3 || previous.v !== 3) {
+    throw new Error(
+      `mergeForwardUnreachableTerritories requires version 3 bundles (received ${fresh.v} and ${previous.v})`,
+    );
+  }
   const freshTerritories = new Set(fresh.services.map((service) => service[3]));
   const carriedServices = previous.services.filter(
     (service) => unreachableTerritories.has(service[3]) && !freshTerritories.has(service[3]),
@@ -306,6 +498,11 @@ export function mergeForwardUnreachableTerritories(
 
   const dns = [...fresh.dns];
   const dnIndex = new Map(dns.map((dn, index) => [dn, index]));
+  const codebook = new QualificationCodebook();
+  for (const element of fresh.quals ?? []) {
+    codebook.add(element);
+  }
+  const previousQuals = previous.quals ?? [];
 
   const remappedServices = carriedServices.map<CompactTrustedService>((service) => {
     const subjectDn = previous.dns[service[2]];
@@ -315,24 +512,43 @@ export function mergeForwardUnreachableTerritories(
       dns.push(subjectDn);
       dnIndex.set(subjectDn, index);
     }
-    const previousSource = service[6] !== undefined ? previous.sources[service[6]] : undefined;
+    const previousSource =
+      service[6] !== undefined && service[6] >= 0 ? previous.sources[service[6]] : undefined;
     const sourceIdx = previousSource
       ? fresh.sources.findIndex(([id]) => id === previousSource[0])
       : -1;
-    return [
+    const qualificationPeriods = (service[7] ?? []).map<CompactQualificationPeriod>(
+      ([fromUnix, toUnix, mask, qualIdxs]) => {
+        const remapped = (qualIdxs ?? []).map((qualIdx) => {
+          const element = previousQuals[qualIdx];
+          if (!element) {
+            throw new Error(`Trusted list bundle contains unknown qualification code ${qualIdx}`);
+          }
+          return codebook.add(element);
+        });
+        return [
+          fromUnix,
+          toUnix,
+          mask,
+          ...(remapped.length > 0 ? [remapped] : []),
+        ] as CompactQualificationPeriod;
+      },
+    );
+    return compactServiceRecord(
       service[0],
-      service[1],
       index,
       service[3],
       service[4],
       service[5],
-      ...(sourceIdx >= 0 ? [sourceIdx] : []),
-    ] as CompactTrustedService;
+      sourceIdx >= 0 ? sourceIdx : undefined,
+      qualificationPeriods,
+    );
   });
 
   return {
     ...fresh,
     dns,
+    quals: codebook.entries,
     services: [...fresh.services, ...remappedServices].sort(sortCompactServices),
   };
 }

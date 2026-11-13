@@ -116,6 +116,7 @@ interface TrustListMatch {
   source?: string; // e.g. "eu" or "ades"
   sourceLabel?: string;
   detail?: string;
+  qualificationPeriods?: TrustedQualificationPeriod[]; // exact signature-issuer matches only
 }
 
 interface TrustListProvider {
@@ -129,6 +130,7 @@ Notes:
 - `time` is required because trust-list answers are historical.
 - `subjectDn` should be the normalized X.500 DN used by the matcher.
 - `source` identifies the list of trusted lists the matched service was published through. With the default sources, `"eu"` is the EU LOTL (EU/EEA national trusted lists) and `"ades"` is the AdES LOTL: trusted lists of third countries (currently e.g. Egypt, Moldova, Ukraine) notified to the EU to help validate their signatures as EU advanced signatures. Services from `"ades"` are not equivalent to EU qualified trust services, so applications should label them accordingly. Bundles generated before this field existed omit it.
+- `qualificationPeriods` lists the granted `CA/QC` periods of the matched issuer with their additional service information and qualifiers. `verifySignature()` uses it to determine `result.qualification`. It is only set for exact signature-issuer matches from bundles that carry qualification data (version 3); an empty array means the issuer was never a granted `CA/QC` service. Custom providers that omit it get `INDETERMINATE` qualification.
 - `dn_only` matches are weak evidence. `verifySignature()` keeps them `indeterminate` unless `allowWeakDnOnlyTrustMatch` is enabled.
 
 ## Remote API Example
@@ -297,6 +299,48 @@ import { createRemoteTrustListProvider } from "edockit/trusted-list/http";
 const trustListProvider = createRemoteTrustListProvider({
   url: "/api/trust-list/match",
 });
+```
+
+## Bundle Format
+
+`generateTrustedListBundle` writes compact JSON (version 3):
+
+```text
+{
+  v: 3, bundleId, generatedAt,
+  sources: [[id, label, lotlUrl], ...],
+  dns: [normalizedSubjectDn, ...],
+  quals: [[qualifiers, criteria], ...],          // qualification element codebook
+  services: [[
+    spkiKey,        // first 24 base64url chars of SHA-256(SPKI), 144 bits
+    null,           // SKI (version 2 only)
+    dnIdx, country, purposeMask, [[fromUnix, toUnix|null], ...],
+    sourceIdx,
+    [[fromUnix, toUnix|null, asiMask, [qualIdx, ...]], ...]  // granted CA/QC periods (optional)
+  ], ...]
+}
+```
+
+- A key is only trusted after the certificate's signature has been verified with it, so a 144-bit key prefix is enough: substituting another key would need a second preimage.
+- `asiMask` bits: 1 = `ForeSignatures`, 2 = `ForeSeals`, 4 = `ForWebSiteAuthentication`.
+- Gzipped, the bundle is about 35% smaller than version 2 even with the qualification data, and loads several times faster (DNs are stored normalized and keys need no decoding).
+- Version 2 bundles remain readable (no qualification data, so `qualification.level` is `INDETERMINATE`). Older edockit versions cannot match keys in version 3 bundles, so generate and load the bundle with the same edockit version.
+
+To keep last-known-good coverage when a national list is temporarily unreachable while building (both bundles must be version 3):
+
+```typescript
+import {
+  fetchTrustedListBundleWithDiagnostics,
+  mergeForwardUnreachableTerritories,
+} from "edockit/trusted-list/build";
+import { getBundledTrustedListBundle } from "edockit/trusted-list/bundled";
+
+const { bundle, diagnostics } = await fetchTrustedListBundleWithDiagnostics();
+const merged = mergeForwardUnreachableTerritories(
+  bundle,
+  previousBundle ?? getBundledTrustedListBundle(),
+  new Set(diagnostics.unreachableTerritories),
+);
 ```
 
 ## Practical Rollout

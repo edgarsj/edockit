@@ -2,13 +2,22 @@ import bundledTrustedListBundle from "../../data/trusted-list.js";
 import type { TrustListProvider } from "./contract";
 import { buildTrustedListData, createEmptyTrustedListBundle } from "./loader";
 import { createTrustListProvider } from "./reference-provider";
-import type { TrustedListData } from "./types";
+import type { CompactTrustedListBundle, TrustedListData } from "./types";
 
 const BUNDLED_SNAPSHOT_MAX_AGE_DAYS = 14;
 const BUNDLED_SNAPSHOT_MAX_AGE_MS = BUNDLED_SNAPSHOT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 
 let bundledTrustedListCache: TrustedListData | null = null;
 let hasWarnedAboutStaleBundledSnapshot = false;
+
+/**
+ * The trusted-list snapshot shipped with this edockit version (generated when
+ * the version was released). Useful as a last-known-good fallback when
+ * building a fresh bundle, e.g. with `mergeForwardUnreachableTerritories`.
+ */
+export function getBundledTrustedListBundle(): CompactTrustedListBundle {
+  return bundledTrustedListBundle || createEmptyTrustedListBundle();
+}
 
 function getBundledTrustedListData(): TrustedListData {
   if (!bundledTrustedListCache) {

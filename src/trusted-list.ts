@@ -8,9 +8,11 @@ export type {
 
 export {
   base64UrlToHex,
+  getSpkiKey,
   getTrustListPurposeMaskForQueryPurpose,
   getTrustListPurposeMaskForServiceType,
   hexToBase64Url,
+  isQualifiedServiceStatus,
   isTrustedServiceStatus,
   normalizeDistinguishedName,
   normalizeHex,
@@ -43,6 +45,8 @@ export type {
 
 export type {
   CertificateIdentity,
+  CompactQualificationElement,
+  CompactQualificationPeriod,
   CompactTrustedInterval,
   CompactTrustedListBundle,
   CompactTrustedListSource,
@@ -50,7 +54,10 @@ export type {
   IssuerIdentity,
   MatchCertificateToTrustedListOptions,
   MatchIssuerOptions,
+  QualificationCriteriaList,
+  QualificationElement,
   TrustListPurposeMask,
+  TrustedQualificationPeriod,
   TrustedListData,
   TrustedListEntry,
   TrustedListIndexes,

@@ -17,6 +17,7 @@ import {
   normalizeDistinguishedName,
   normalizeKeyIdentifier,
 } from "./normalize";
+import { parseServiceInformationExtensions } from "./qualifications";
 import type {
   TslPointer,
   TrustedListSource,
@@ -131,6 +132,7 @@ function buildSnapshotsFromDigitalIdentities(
     tspName: string;
     status: string;
     startTime: string;
+    extensions: ReturnType<typeof parseServiceInformationExtensions>;
   },
 ): TrustedServiceSnapshot[] {
   const identitiesWithSubject = identities.filter((identity) => identity.subjectDn);
@@ -168,6 +170,12 @@ function buildSnapshotsFromDigitalIdentities(
       sourceLabel: context.source.label,
       status: context.status,
       startTime: context.startTime,
+      ...(context.extensions.additionalServiceInfo.length > 0
+        ? { additionalServiceInfo: context.extensions.additionalServiceInfo }
+        : {}),
+      ...(context.extensions.qualifications.length > 0
+        ? { qualifications: context.extensions.qualifications }
+        : {}),
     };
   });
 }
@@ -294,6 +302,10 @@ function buildTrustedServicesFromSnapshots(snapshots: TrustedServiceSnapshot[]):
             status: snapshot.status,
             from: snapshot.startTime,
             to: sortedSnapshots[index + 1]?.startTime || null,
+            ...(snapshot.additionalServiceInfo
+              ? { additionalServiceInfo: snapshot.additionalServiceInfo }
+              : {}),
+            ...(snapshot.qualifications ? { qualifications: snapshot.qualifications } : {}),
           })),
         };
       }),
@@ -360,6 +372,7 @@ async function extractServiceSnapshots(
         tspName: context.tspName,
         status,
         startTime,
+        extensions: parseServiceInformationExtensions(container),
       }),
     );
   }

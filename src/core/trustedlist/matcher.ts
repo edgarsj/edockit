@@ -1,4 +1,5 @@
 import {
+  getSpkiKey,
   trustListPurposeMatchesMask,
   normalizeDistinguishedName,
   normalizeHex,
@@ -161,17 +162,15 @@ export function matchTrustListQuery(
   const normalizedSpkiSha256Hex = normalizeHex(query.spkiSha256Hex);
   const normalizedSkiHex = normalizeKeyIdentifier(query.skiHex);
 
-  if (normalizedSpkiSha256Hex) {
+  const spkiKey = getSpkiKey(normalizedSpkiSha256Hex);
+  if (spkiKey) {
     const exactMatches = filterServicesBySubjectDn(
-      filterServicesByPurpose(
-        trustedListData.indexes.bySpkiSha256.get(normalizedSpkiSha256Hex),
-        query.purpose,
-      ),
+      filterServicesByPurpose(trustedListData.indexes.bySpkiKey.get(spkiKey), query.purpose),
       normalizedSubjectDn,
     );
 
     if (exactMatches.length > 0) {
-      return pickBestServiceMatch(
+      const match = pickBestServiceMatch(
         exactMatches,
         {
           ...query,
@@ -180,6 +179,17 @@ export function matchTrustListQuery(
         },
         "exact",
       );
+
+      if (
+        query.purpose === "signature_issuer" &&
+        exactMatches.every((service) => service.qualificationPeriods !== undefined)
+      ) {
+        match.qualificationPeriods = exactMatches
+          .flatMap((service) => service.qualificationPeriods ?? [])
+          .sort((left, right) => left.fromUnix - right.fromUnix);
+      }
+
+      return match;
     }
   }
 

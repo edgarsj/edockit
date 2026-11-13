@@ -1,3 +1,5 @@
+import type { TrustedQualificationPeriod } from "./types";
+
 export type TrustListQueryPurpose = "signature_issuer" | "timestamp_tsa";
 
 export type TrustMatchConfidence = "exact" | "ski_dn" | "dn_only";
@@ -24,6 +26,14 @@ export interface TrustListMatch {
   source?: string;
   sourceLabel?: string;
   detail?: string;
+  /**
+   * Granted CA/QC periods of the matched service(s), used to determine whether
+   * the certificates the issuer issued are qualified. Only set for exact
+   * signature-issuer matches when the trusted-list data carries qualification
+   * data (version 3 bundles); an empty array means the matched service was
+   * never a granted CA/QC service.
+   */
+  qualificationPeriods?: TrustedQualificationPeriod[];
 }
 
 export interface TrustListProvider {

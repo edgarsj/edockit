@@ -2,6 +2,7 @@ import {
   buildCompactTrustedListBundle,
   buildTrustedListData,
 } from "../../../../src/core/trustedlist/loader";
+import { getSpkiKey } from "../../../../src/core/trustedlist/normalize";
 import { TrustedListSource, TrustedService } from "../../../../src/core/trustedlist/types";
 
 const SOURCES: TrustedListSource[] = [
@@ -59,8 +60,9 @@ describe("trusted-list loader", () => {
     expect(trustedListData.generatedAt).toBe("2026-03-14T00:00:00Z");
     expect(trustedListData.services).toHaveLength(2);
     expect(trustedListData.indexes.bySubjectDn.get("C=LV,CN=Issuer,O=Example")).toHaveLength(2);
-    expect(trustedListData.indexes.bySki.get("aa11")).toHaveLength(1);
-    expect(trustedListData.indexes.bySpkiSha256.get("bb22")).toHaveLength(1);
+    // Version 3 bundles carry no SKI; SPKI hashes are indexed by their lookup key
+    expect(trustedListData.indexes.bySki.size).toBe(0);
+    expect(trustedListData.indexes.bySpkiKey.get(getSpkiKey("bb22")!)).toHaveLength(1);
     expect(
       trustedListData.services
         .flatMap((service) => service.trustIntervals)

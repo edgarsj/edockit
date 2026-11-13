@@ -2,24 +2,26 @@ import { mergeForwardUnreachableTerritories } from "../../../../src/core/trusted
 import type { CompactTrustedListBundle } from "../../../../src/core/trustedlist/types";
 
 const fresh: CompactTrustedListBundle = {
-  v: 2,
+  v: 3,
   bundleId: "2026-06-25T00-00-00Z",
   generatedAt: "2026-06-25T00:00:00.000Z",
   sources: [["eu", "EU LOTL", "https://example.test/eu-lotl.xml"]],
-  dns: ["CN=Fresh LV,C=LV"],
-  services: [["lvspki", "lvski", 0, "LV", 1, [[1700000000, null]]]],
+  dns: ["C=LV,CN=Fresh LV"],
+  quals: [],
+  services: [["lvspki", null, 0, "LV", 1, [[1700000000, null]]]],
 };
 
 const previous: CompactTrustedListBundle = {
-  v: 2,
+  v: 3,
   bundleId: "2026-03-14T00-00-00Z",
   generatedAt: "2026-03-14T00:00:00.000Z",
   sources: [["eu", "EU LOTL", "https://example.test/eu-lotl.xml"]],
-  dns: ["CN=Old LV,C=LV", "CN=Old EE,C=EE", "CN=Old LT,C=LT"],
+  dns: ["C=LV,CN=Old LV", "C=EE,CN=Old EE", "C=LT,CN=Old LT"],
+  quals: [],
   services: [
-    ["lvspki-old", "lvski-old", 0, "LV", 1, [[1600000000, null]]],
-    ["eespki", "eeski", 1, "EE", 2, [[1600000000, null]]],
-    ["ltspki", "ltski", 2, "LT", 1, [[1600000000, null]]],
+    ["lvspki-old", null, 0, "LV", 1, [[1600000000, null]]],
+    ["eespki", null, 1, "EE", 2, [[1600000000, null]]],
+    ["ltspki", null, 2, "LT", 1, [[1600000000, null]]],
   ],
 };
 
@@ -36,7 +38,7 @@ describe("mergeForwardUnreachableTerritories", () => {
   it("preserves the carried-forward service's subject DN via remapped index", () => {
     const merged = mergeForwardUnreachableTerritories(fresh, previous, new Set(["EE"]));
     const eeService = merged.services.find((s) => s[3] === "EE")!;
-    expect(merged.dns[eeService[2]]).toBe("CN=Old EE,C=EE");
+    expect(merged.dns[eeService[2]]).toBe("C=EE,CN=Old EE");
   });
 
   it("does not carry forward territories already present in the fresh bundle (fresh wins)", () => {
@@ -57,6 +59,13 @@ describe("mergeForwardUnreachableTerritories", () => {
     const merged = mergeForwardUnreachableTerritories(fresh, previous, new Set(["EE"]));
     expect(merged.generatedAt).toBe(fresh.generatedAt);
     expect(merged.bundleId).toBe(fresh.bundleId);
+  });
+
+  it("rejects version 2 bundles", () => {
+    const v2: CompactTrustedListBundle = { ...previous, v: 2, quals: undefined };
+    expect(() => mergeForwardUnreachableTerritories(fresh, v2, new Set(["EE"]))).toThrow(
+      "requires version 3 bundles",
+    );
   });
 
   it("returns the fresh bundle unchanged when nothing is missing", () => {

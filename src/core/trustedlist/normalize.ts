@@ -20,6 +20,8 @@ const KNOWN_STATUS_SUFFIXES = [
   "accredited",
   "withdrawn",
   "deprecatedatnationallevel",
+  "undersupervision",
+  "supervisionincessation",
 ] as const;
 
 const DN_ATTRIBUTE_ALIASES: Record<string, string> = {
@@ -228,13 +230,51 @@ export function normalizeDistinguishedName(dn?: string | null): string {
   return normalizedParts.sort((left, right) => left.localeCompare(right)).join(",");
 }
 
+/**
+ * Statuses in which a service is trusted. Besides the eIDAS "granted" status
+ * this includes the statuses used before 1 July 2016 under Directive 1999/93/EC
+ * ("undersupervision", "supervisionincessation", "accredited"), which the
+ * national lists keep in the service history.
+ */
 export function isTrustedServiceStatus(status: string): boolean {
   const normalizedStatus = status.trim().toLowerCase();
   return (
     normalizedStatus === "granted" ||
     normalizedStatus === "recognisedatnationallevel" ||
-    normalizedStatus === "accredited"
+    normalizedStatus === "accredited" ||
+    normalizedStatus === "undersupervision" ||
+    normalizedStatus === "supervisionincessation"
   );
+}
+
+/**
+ * Statuses in which a CA/QC service issues qualified certificates: "granted",
+ * and its pre-eIDAS equivalents.
+ */
+export function isQualifiedServiceStatus(status: string): boolean {
+  const normalizedStatus = status.trim().toLowerCase();
+  return (
+    normalizedStatus === "granted" ||
+    normalizedStatus === "accredited" ||
+    normalizedStatus === "undersupervision" ||
+    normalizedStatus === "supervisionincessation"
+  );
+}
+
+/** Number of base64url characters of SHA-256(SPKI) used as lookup key (144 bits). */
+export const SPKI_KEY_LENGTH = 24;
+
+/**
+ * Lookup key of a public key in trusted-list data: the first 24 base64url
+ * characters of SHA-256 over the SubjectPublicKeyInfo (hex input).
+ *
+ * Trust in a matched key is only granted after the certificate's signature
+ * has been verified with it, so finding a different key with the same key
+ * would take a second preimage on 144 bits.
+ */
+export function getSpkiKey(spkiSha256Hex?: string | null): string | null {
+  const base64Url = hexToBase64Url(spkiSha256Hex);
+  return base64Url ? base64Url.slice(0, SPKI_KEY_LENGTH) : null;
 }
 
 export function getRelevantServiceType(uri?: string | null): string | null {

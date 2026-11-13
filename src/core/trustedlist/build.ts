@@ -137,10 +137,12 @@ export async function writeTrustedListBundle(
 export async function generateTrustedListBundle(
   options: GenerateTrustedListBundleOptions,
 ): Promise<WriteTrustedListBundleResult> {
-  const { sources, timeout, proxyUrl, ...writeOptions } = options;
+  const { sources, timeout, proxyUrl, retries, allowInsecureHttp, ...writeOptions } = options;
   const bundle = await fetchTrustedListBundle(sources || DEFAULT_TRUSTED_LIST_SOURCES, {
     timeout,
     proxyUrl,
+    retries,
+    allowInsecureHttp,
   });
 
   return writeTrustedListBundle({

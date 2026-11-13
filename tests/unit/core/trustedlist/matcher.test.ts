@@ -6,7 +6,9 @@ import {
   buildCompactTrustedListBundle,
   buildTrustedListData,
 } from "../../../../src/core/trustedlist/loader";
+import { hexToBase64Url } from "../../../../src/core/trustedlist/normalize";
 import {
+  CompactTrustedService,
   IssuerIdentity,
   TrustedListSource,
   TrustedService,
@@ -24,6 +26,20 @@ function createTrustedListData(services: TrustedService[]) {
   return buildTrustedListData(
     buildCompactTrustedListBundle(services, SOURCES, "2026-03-14T00:00:00Z"),
   );
+}
+
+/** Version 2 bundle (full SPKI hash and SKI) for a single service */
+function createV2TrustedListData(service: TrustedService) {
+  const bundle = buildCompactTrustedListBundle([service], SOURCES, "2026-03-14T00:00:00Z");
+  return buildTrustedListData({
+    ...bundle,
+    v: 2,
+    quals: undefined,
+    services: bundle.services.map(
+      (record) =>
+        [record[0], hexToBase64Url(service.skiHex), ...record.slice(2, 7)] as CompactTrustedService,
+    ),
+  });
 }
 
 describe("trusted-list matcher", () => {
@@ -102,26 +118,24 @@ describe("trusted-list matcher", () => {
     expect(match.detail).toContain("issuer match by SPKI");
   });
 
-  it("uses AKI plus issuer DN when the issuer certificate is not available", () => {
-    const trustedListData = createTrustedListData([
-      {
-        skiHex: "deadbeef",
-        spkiSha256Hex: "aa11",
-        subjectDn: "CN=Issuer,O=Example,C=LV",
-        country: "LV",
-        tspName: "LVRTC",
-        serviceType: "CA/QC",
-        source: "eu",
-        sourceLabel: "EU LOTL",
-        history: [
-          {
-            status: "granted",
-            from: "2024-01-01T00:00:00Z",
-            to: null,
-          },
-        ],
-      },
-    ]);
+  it("uses AKI plus issuer DN from version 2 bundles when the issuer certificate is not available", () => {
+    const trustedListData = createV2TrustedListData({
+      skiHex: "deadbeef",
+      spkiSha256Hex: "aa11",
+      subjectDn: "CN=Issuer,O=Example,C=LV",
+      country: "LV",
+      tspName: "LVRTC",
+      serviceType: "CA/QC",
+      source: "eu",
+      sourceLabel: "EU LOTL",
+      history: [
+        {
+          status: "granted",
+          from: "2024-01-01T00:00:00Z",
+          to: null,
+        },
+      ],
+    });
 
     const match = matchIssuerIdentityToTrustedList(
       {
@@ -178,30 +192,28 @@ describe("trusted-list matcher", () => {
   });
 
   it("returns a failed trust result when the issuer is matched but not trusted at signing time", () => {
-    const trustedListData = createTrustedListData([
-      {
-        skiHex: "deadbeef",
-        spkiSha256Hex: "aa11",
-        subjectDn: "CN=Issuer,O=Example,C=LV",
-        country: "LV",
-        tspName: "LVRTC",
-        serviceType: "CA/QC",
-        source: "eu",
-        sourceLabel: "EU LOTL",
-        history: [
-          {
-            status: "granted",
-            from: "2023-01-01T00:00:00Z",
-            to: "2024-01-01T00:00:00Z",
-          },
-          {
-            status: "withdrawn",
-            from: "2024-01-01T00:00:00Z",
-            to: null,
-          },
-        ],
-      },
-    ]);
+    const trustedListData = createV2TrustedListData({
+      skiHex: "deadbeef",
+      spkiSha256Hex: "aa11",
+      subjectDn: "CN=Issuer,O=Example,C=LV",
+      country: "LV",
+      tspName: "LVRTC",
+      serviceType: "CA/QC",
+      source: "eu",
+      sourceLabel: "EU LOTL",
+      history: [
+        {
+          status: "granted",
+          from: "2023-01-01T00:00:00Z",
+          to: "2024-01-01T00:00:00Z",
+        },
+        {
+          status: "withdrawn",
+          from: "2024-01-01T00:00:00Z",
+          to: null,
+        },
+      ],
+    });
 
     const match = matchIssuerIdentityToTrustedList(
       {

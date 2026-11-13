@@ -52,6 +52,7 @@ Use `revocationOptions.proxyUrl` in browsers because OCSP and CRL endpoints usua
 - `checklist`: optional structured verification steps when `includeChecklist: true`
 - `trustListMatch`: signer-issuer trust-list result when `trustListProvider` is configured
 - `timestampTrustListMatch`: timestamp-authority trust-list result when `trustListProvider` is configured
+- `qualification`: eIDAS qualification of the signature (`QESig`, `QESeal`, `AdESig-QC`, ...) when the issuer was verified against the trusted list; see [Signature Qualification](#signature-qualification)
 
 `VALID` requires all of the following:
 
@@ -68,6 +69,29 @@ Without a `trustListProvider` the result is `INDETERMINATE` with the `TRUST_NOT_
 `allowWeakDnOnlyTrustMatch` is off by default, so DN-only trusted-list matches remain `indeterminate` in the checklist; they never produce `VALID`.
 
 `parseEdoc(buffer, options)` rejects containers with unsafe entry names (absolute paths, `..` segments, duplicates) and enforces size limits (`maxEntries`, `maxEntrySize`, `maxTotalSize`; see `DEFAULT_PARSE_EDOC_LIMITS`).
+
+## Signature Qualification
+
+When the signer certificate's issuer is verified against the trusted list, `verifySignature()` also reports the signature's eIDAS qualification in `result.qualification`:
+
+| `level` | Meaning |
+|---|---|
+| `QESig` / `QESeal` | Qualified electronic signature / seal: qualified certificate and private key in a qualified signature/seal creation device (QSCD) |
+| `AdESig-QC` / `AdESeal-QC` | Advanced signature / seal with a qualified certificate, key not in a QSCD |
+| `AdESig` / `AdESeal` / `AdES` | Advanced signature / seal (type unknown) without a qualified certificate |
+| `INDETERMINATE` | Could not be determined (e.g. trusted-list data without qualification information) |
+
+The level combines the certificate's QC statements (ETSI EN 319 412-5: QcCompliance, QcType, QcSSCD) with the issuing service in the EU trusted list: a granted `CA/QC` service at certificate issuance and at signing time, its `ForeSignatures` / `ForeSeals` / `ForWebSiteAuthentication` information, and its qualifiers (e.g. `QCWithQSCD`, `QCNoQSCD`, `NotQualified`), following ETSI TS 119 615 in simplified form. Issuers from third-country lists (`source: "ades"`) are not EU qualified.
+
+The result also carries `qualifiedCertificate`, `certificateType` (`"esign" | "eseal" | "web"`), `qscd`, the evaluation at issuance and at signing time, and `notes` explaining a lower level. It describes the signature only as far as `status` allows: show it as qualified only when `status` is `VALID`.
+
+The certificate's QC statements can also be read directly:
+
+```typescript
+import { getQcStatements } from "edockit";
+
+const qc = getQcStatements(x509Certificate); // { qcCompliance, qcQSCD, qcTypes, ... } or null
+```
 
 ## Trusted List Setup
 
@@ -121,6 +145,7 @@ Use these if you need direct RFC 3161 parsing or verification outside `verifySig
 - Return granular validation statuses instead of only boolean success/failure
 - Return a structured verification checklist for consumer applications
 - Match both signer issuers and timestamp authorities against a trusted list through an explicit provider contract
+- Determine eIDAS signature qualification (QES, AdES with qualified certificate, AdES) from QC statements and trusted-list qualifiers
 
 ## Compatibility
 

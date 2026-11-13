@@ -31,6 +31,8 @@ import {
 } from "./trustedlist/identity";
 import type { TrustListMatch, TrustListProvider } from "./trustedlist/contract";
 import type { TrustedListFetchOptions } from "./trustedlist/types";
+import { getCertificateQualificationFacts } from "./qcStatements";
+import { determineSignatureQualification, SignatureQualification } from "./qualification";
 
 /**
  * Options for verification process
@@ -161,6 +163,12 @@ export interface VerificationResult {
   checklist?: ChecklistItem[];
   trustListMatch?: TrustListMatch;
   timestampTrustListMatch?: TrustListMatch;
+  /**
+   * eIDAS qualification of the signature (QESig, AdESig-QC, ...). Present when
+   * the status is VALID or INDETERMINATE and the issuer was verified against
+   * the trusted list; it describes the signature only as far as `status` allows.
+   */
+  qualification?: SignatureQualification;
   errors?: string[];
 }
 
@@ -1883,6 +1891,27 @@ export async function verifySignature(
       })
     : undefined;
 
+  let qualification: SignatureQualification | undefined;
+  if (
+    (status === "VALID" || status === "INDETERMINATE") &&
+    issuerVerified &&
+    trustListMatch?.found &&
+    trustListMatch.trustedAtTime === true &&
+    trustListMatch.confidence === "exact"
+  ) {
+    try {
+      qualification = determineSignatureQualification({
+        facts: getCertificateQualificationFacts(new X509Certificate(signatureInfo.certificatePEM)),
+        trustListMatch,
+        signingTime: trustedSigningTime,
+      });
+    } catch (error) {
+      errors.push(
+        `Qualification check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   return {
     isValid,
     status,
@@ -1895,6 +1924,7 @@ export async function verifySignature(
     checklist,
     trustListMatch,
     timestampTrustListMatch,
+    ...(qualification ? { qualification } : {}),
     errors: errors.length > 0 ? errors : undefined,
   };
 }
