@@ -18,7 +18,11 @@ export interface TimestampInfo {
   messageImprint: string;
   /** TSA name (if provided) */
   tsaName?: string;
-  /** TSA certificate (PEM format) */
+  /**
+   * TSA certificate (PEM format): the certificate identified by the token's
+   * SignerInfo (issuerAndSerialNumber / subjectKeyIdentifier). Undefined when
+   * no matching certificate was found.
+   */
   tsaCertificate?: string;
   /** Accuracy of the timestamp (in seconds) */
   accuracy?: number;
@@ -36,6 +40,11 @@ export interface TimestampVerificationResult {
   reason?: string;
   /** Whether the timestamp covers the signature value correctly */
   coversSignature?: boolean;
+  /**
+   * Whether the token's CMS signature and signed attributes (content-type,
+   * message-digest, signing-certificate) verified against the TSA certificate
+   */
+  signatureValid?: boolean;
   /** TSA certificate revocation check result (if checkTsaRevocation was enabled) */
   tsaRevocation?: RevocationResult;
 }
@@ -46,6 +55,11 @@ export interface TimestampVerificationResult {
 export interface TimestampVerificationOptions {
   /** The canonicalized ds:SignatureValue XML element (per XAdES spec) */
   canonicalSignatureValue?: string;
+  /**
+   * Additional candidate certificates (PEM or base64 DER) used to locate the TSA
+   * certificate when the token does not embed it (e.g. XAdES CertificateValues)
+   */
+  certificates?: string[];
   /** Verify the TSA certificate chain */
   verifyTsaCertificate?: boolean;
   /** Check TSA certificate revocation */

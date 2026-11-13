@@ -9,8 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Stricter validation status** - `VALID` now requires a configured `trustListProvider` and an issuer certificate that cryptographically issued the signer certificate and is listed in the trusted list (SPKI match). Without a provider the status is `INDETERMINATE` (`TRUST_NOT_CHECKED`); a SKI/DN-only match is `INDETERMINATE` (`ISSUER_NOT_VERIFIED`); an available issuer certificate that did not sign the signer certificate is `INVALID`
+- **Proof of time** - Certificate expiry and revocation are evaluated at the time of a verified signature timestamp from a trusted timestamp authority, otherwise at the validation time. The claimed `SigningTime` is reported but no longer used for these checks
+- **Revocation** - Unknown or unavailable revocation status is now `INDETERMINATE` (`REVOCATION_UNKNOWN`) instead of passing. OCSP responses are verified (signature, responder authorization, CertID, freshness) and CRLs are verified (issuer signature, issuer name, freshness) before their status is used. Verified OCSP responses embedded in the signature are used for long-term validation when live data is unavailable
+- **Timestamp validation** - RFC 3161 tokens are verified cryptographically (CMS signature, message digest, TSA certificate identified by `sid`, ESS signing-certificate binding, timeStamping EKU); a token that does not cover the signature is invalid
+- **Signature structure** - `SignedInfo`, `SignatureValue`, `KeyInfo`, references and qualifying properties are resolved by their exact position in the top-level `ds:Signature`; same-document references (`SignedProperties`) are digest-verified and `SigningCertificate(V2)` is checked against the signer certificate. A signature that covers no files is `INVALID`
+- **Container parsing** - `parseEdoc(buffer, options)` enforces entry-count and size limits (`ParseEdocOptions`, `DEFAULT_PARSE_EDOC_LIMITS`) and rejects unsafe or duplicate entry names; the text-based signature fallback was removed
+- **Network limits** - Revocation and certificate fetches accept only `http:`/`https:` URLs (including redirects), cap response sizes and the number of URLs per certificate, and apply the timeout to the body read
 - **Refreshed bundled EU trusted-list snapshot** - Regenerated from the EU LOTL and AdES LOTL on 2026-11-13 (3811 → 3847 services)
 - **Trusted lists fetched over HTTPS by default** - `http://` LOTL/TSL locations (e.g. the Slovak TSL pointer) are upgraded to `https://` because trusted-list XML signatures are not verified by the builder; opt out with `allowInsecureHttp: true`. Failed endpoints are retried once (`retries` option)
+
+### Fixed
+
+- **XML canonicalization** - Canonical XML 1.0, 1.1 and exclusive c14n now match libxml2 output: exclusive c14n renders namespace declarations where visibly used; inclusive subtrees pass their rendered namespace context to descendants and carry inherited `xml:*` attributes (with the C14N 1.1 `xml:base` fixup); text and attribute escaping, attribute ordering, CDATA sections, processing instructions and `#WithComments` follow the specifications; unknown canonicalization URIs are rejected instead of falling back to inclusive c14n
+- **RSA DigestInfo compatibility check** - The non-standard (NULL-less) DigestInfo fallback now requires an exact encoding match
 
 ### Security
 

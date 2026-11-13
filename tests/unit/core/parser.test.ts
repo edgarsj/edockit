@@ -1,266 +1,128 @@
 // tests/unit/core/parser.test.ts
-import { __test__ } from "../../../src/core/parser/signatureParser";
-import { querySelector, querySelectorAll } from "../../../src/utils/xmlParser";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { unzipSync } from "fflate";
+import { __test__, parseSignatureFile } from "../../../src/core/parser/signatureParser";
+import { createXMLParser } from "../../../src/utils/xmlParser";
+import { locateTopLevelSignatures } from "../../../src/core/parser/signatureStructure";
 
 const { parseSignatureElement } = __test__;
 
-// maybe remove the serialization in implementation or test separately
-global.XMLSerializer = jest.fn().mockImplementation(() => ({
-  serializeToString: jest.fn().mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
-}));
+const SAMPLE = join(__dirname, "../../fixtures/valid_samples/SampleFile.edoc");
+const SIGNATURE_PATH = "META-INF/edoc-signatures-S1.xml";
 
-// Mock the certificate module
-jest.mock("../../../src/core/certificate", () => ({
-  extractSignerInfo: jest.fn().mockReturnValue({
-    commonName: "Test User",
-    organization: "Test Org",
-    country: "US",
-    serialNumber: "12345",
-    validFrom: new Date(),
-    validTo: new Date(),
-    issuer: {
-      commonName: "Test CA",
-      organization: "Test CA Org",
-      country: "US",
-    },
-  }),
-}));
+function loadSampleSignatureXml(): string {
+  const files = unzipSync(readFileSync(SAMPLE));
+  return new TextDecoder().decode(files[SIGNATURE_PATH]);
+}
 
-// Mock X509Certificate
-jest.mock("@peculiar/x509", () => ({
-  X509Certificate: class MockX509Certificate {
-    publicKey: any;
+function parseTopLevel(xml: string) {
+  const doc = createXMLParser().parseFromString(xml, "application/xml");
+  const [signature] = locateTopLevelSignatures(doc);
+  return parseSignatureElement(signature, doc);
+}
 
-    constructor() {
-      this.publicKey = {
-        algorithm: {
-          name: "RSASSA-PKCS1-v1_5",
-        },
-        rawData: new ArrayBuffer(0),
-      };
-    }
+const DS = 'xmlns:ds="http://www.w3.org/2000/09/xmldsig#"';
 
-    // Add missing methods for X509Certificate
-    exportAsPem() {
-      return "-----BEGIN CERTIFICATE-----\nMockCertificateBase64==\n-----END CERTIFICATE-----";
-    }
-  },
-}));
+function minimalSignature(signedInfoInner: string, extra = ""): string {
+  return `<asic:XAdESSignatures xmlns:asic="http://uri.etsi.org/02918/v1.2.1#"><ds:Signature ${DS} Id="S0">
+    <ds:SignedInfo>
+      <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
+      <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+      ${signedInfoInner}
+    </ds:SignedInfo>
+    <ds:SignatureValue>AAAA</ds:SignatureValue>
+    ${extra}
+  </ds:Signature></asic:XAdESSignatures>`;
+}
 
-// Mock canonicalization methods
-jest.mock("../../../src/core/canonicalization/XMLCanonicalizer", () => {
-  const mockCanonicalize = jest
-    .fn()
-    .mockReturnValue("<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>");
-  const mockFromMethod = jest.fn();
-
-  return {
-    __mockCanonicalize: mockCanonicalize,
-    __mockFromMethod: mockFromMethod,
-    XMLCanonicalizer: class MockXMLCanonicalizer {
-      canonicalize = mockCanonicalize;
-
-      static fromMethod = mockFromMethod;
-    },
-    CANONICALIZATION_METHODS: {
-      default: "http://www.w3.org/2001/10/xml-exc-c14n#",
-    },
-  };
-});
-
-// Mock the XMLParser utilities
-jest.mock("../../../src/utils/xmlParser", () => ({
-  createXMLParser: jest.fn(),
-  querySelector: jest.fn(),
-  querySelectorAll: jest.fn(),
-  serializeToXML: jest.fn().mockReturnValue("<ds:SignedInfo>mocked xml</ds:SignedInfo>"),
-}));
-
-const { __mockCanonicalize, __mockFromMethod } =
-  require("../../../src/core/canonicalization/XMLCanonicalizer") as {
-    __mockCanonicalize: jest.Mock;
-    __mockFromMethod: jest.Mock;
-  };
+const reference = (uri: string, digest: string) => `<ds:Reference URI="${uri}">
+  <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+  <ds:DigestValue>${digest}</ds:DigestValue>
+</ds:Reference>`;
 
 describe("Signature Parser", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (__mockCanonicalize as jest.Mock).mockReturnValue(
-      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
-    );
-    (__mockFromMethod as jest.Mock).mockReturnValue({
-      canonicalize: __mockCanonicalize,
-    });
+  it("should extract data from signature element", () => {
+    const result = parseTopLevel(loadSampleSignatureXml());
 
-    // Create a map of selector patterns to responses
-    const mockResponses = {
-      SignatureTimeStamp: {
-        nodeName: "xades:SignatureTimeStamp",
-      },
-      SignedInfo: {
-        nodeName: "ds:SignedInfo",
-      },
-      CanonicalizationMethod: {
-        getAttribute: () => "http://www.w3.org/2001/10/xml-exc-c14n#",
-      },
-      SignatureMethod: {
-        getAttribute: () => "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
-      },
-      SignatureValue: {
-        textContent: "MockSignatureValueBase64==",
-      },
-      InclusiveNamespaces: {
-        getAttribute: (attr: string) => (attr === "PrefixList" ? "asic xades" : null),
-      },
-      X509Certificate: {
-        textContent: "MockCertificateBase64==",
-      },
-      SigningTime: {
-        textContent: "2023-04-15T14:30:00Z",
-      },
-      DigestValue: {
-        textContent: "mock-digest-value",
-      },
-      Reference: {
-        getAttribute: (attr: string) => {
-          if (attr === "URI") return "test.pdf";
-          if (attr === "Type") return "";
-          return "";
-        },
-        querySelector: jest.fn().mockImplementation((selector) => {
-          if (selector.includes("DigestValue")) {
-            return { textContent: "mock-digest-value" };
-          }
-          if (selector.includes("DigestMethod")) {
-            return { getAttribute: () => "http://www.w3.org/2001/04/xmlenc#sha256" };
-          }
-          return null;
-        }),
-      },
-    };
-
-    // Setup mock for querySelector - no recursion
-    (querySelector as jest.Mock).mockImplementation((element, selector) => {
-      // Check each key pattern and return the corresponding mock
-      for (const [pattern, response] of Object.entries(mockResponses)) {
-        if (selector.includes(pattern)) {
-          return response;
-        }
-      }
-      return null;
-    });
-
-    // Setup mock for querySelectorAll
-    (querySelectorAll as jest.Mock).mockImplementation((element, selector) => {
-      if (selector.includes("Reference")) {
-        return [
-          {
-            getAttribute: (attr: string) => {
-              if (attr === "URI") return "test.pdf";
-              if (attr === "Type") return "";
-              return "";
-            },
-            querySelector: (sel: string) => {
-              if (sel.includes("DigestValue")) {
-                return { textContent: "mock-digest-value" };
-              }
-              if (sel.includes("DigestMethod")) {
-                return { getAttribute: () => "http://www.w3.org/2001/04/xmlenc#sha256" };
-              }
-              return null;
-            },
-          },
-        ];
-      }
-
-      return [];
-    });
+    expect(result.id).toBe("S1");
+    expect(result.signingTime.toISOString()).toBe("2025-03-19T16:59:22.000Z");
+    expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
+    expect(result.publicKey).toBeDefined();
+    expect(result.signerInfo?.commonName).toBeDefined();
+    expect(result.signatureValue?.length).toBeGreaterThan(0);
+    expect(result.canonicalSignatureValue).toContain("<ds:SignatureValue");
+    expect(result.canonicalizationMethod).toBe("http://www.w3.org/2006/12/xml-c14n11");
+    expect(result.references.sort()).toEqual(["Sample File.docx", "Sample File.pdf"]);
+    expect(Object.keys(result.signedChecksums).sort()).toEqual([
+      "Sample File.docx",
+      "Sample File.pdf",
+    ]);
+    expect(result.signatureTimestamp).toBeDefined();
   });
 
-  it("should extract data from signature element", () => {
-    // Create a mock signature element and document
-    const mockSignatureElement = {
-      nodeName: "ds:Signature",
-      getAttribute: jest.fn().mockReturnValue("test-sig-id"),
-      // Add missing methods for element
-      ownerDocument: {
-        createNodeIterator: jest.fn(),
-        evaluate: jest.fn(),
-      },
-    };
-
-    const mockDocument = {
-      documentElement: {
-        nodeName: "root",
-      },
-      createNodeIterator: jest.fn(),
-      evaluate: jest.fn(),
-    };
-
-    // Call the function with our mocked elements
-    const result = parseSignatureElement(
-      mockSignatureElement as unknown as Element,
-      mockDocument as unknown as Document,
-    );
-
-    // Verify results
-    expect(result.id).toBe("test-sig-id");
-    expect(result.signingTime).toBeInstanceOf(Date);
-    expect(result.certificate).toBe("MockCertificateBase64==");
-    expect(result.certificatePEM).toContain("-----BEGIN CERTIFICATE-----");
-    expect(result.signatureValue).toBe("MockSignatureValueBase64==");
-    expect(result.canonicalSignatureValue).toBe(
-      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
-    );
-    expect(result.algorithm).toBe("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
-    expect(result.signedInfoXml).toBe("<ds:SignedInfo>mocked xml</ds:SignedInfo>");
-    // Verify references array
-    expect(result.references).toContain("test.pdf");
-
-    // Verify signedChecksums object
-    expect(result.signedChecksums).toEqual({ "test.pdf": "mock-digest-value" });
-
-    // Verify that querySelector was called with the right parameters
-    expect(querySelector).toHaveBeenCalledWith(mockSignatureElement, "ds\\:SignedInfo, SignedInfo");
-    expect(__mockFromMethod).toHaveBeenCalledWith("http://www.w3.org/2001/10/xml-exc-c14n#");
-    expect(__mockCanonicalize).toHaveBeenCalledWith(
-      expect.objectContaining({ textContent: "MockSignatureValueBase64==" }),
-      expect.any(Map),
-      { inclusiveNamespacePrefixList: ["asic", "xades"] },
-    );
+  it("parseSignatureFile parses the top-level signature of a signature file", () => {
+    const xml = loadSampleSignatureXml();
+    const result = parseSignatureFile(new TextEncoder().encode(xml), SIGNATURE_PATH);
+    expect(result?.id).toBe("S1");
+    expect(result?.rawXml).toBe(xml);
   });
 
   it("falls back to the default canonicalizer when timestamp c14n URI is unsupported", () => {
-    (__mockFromMethod as jest.Mock).mockImplementation(() => {
-      throw new Error("unsupported");
-    });
-
-    const mockSignatureElement = {
-      nodeName: "ds:Signature",
-      getAttribute: jest.fn().mockReturnValue("test-sig-id"),
-      ownerDocument: {
-        createNodeIterator: jest.fn(),
-        evaluate: jest.fn(),
-      },
-    };
-
-    const mockDocument = {
-      documentElement: {
-        nodeName: "root",
-      },
-      createNodeIterator: jest.fn(),
-      evaluate: jest.fn(),
-    };
-
-    const result = parseSignatureElement(
-      mockSignatureElement as unknown as Element,
-      mockDocument as unknown as Document,
+    const xml = minimalSignature(
+      reference("doc.txt", "ZGlnZXN0"),
+      `<ds:Object><xades:QualifyingProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#">
+        <xades:UnsignedProperties><xades:UnsignedSignatureProperties>
+          <xades:SignatureTimeStamp>
+            <ds:CanonicalizationMethod Algorithm="urn:example:unsupported-c14n"/>
+            <xades:EncapsulatedTimeStamp>AAAA</xades:EncapsulatedTimeStamp>
+          </xades:SignatureTimeStamp>
+        </xades:UnsignedSignatureProperties></xades:UnsignedProperties>
+      </xades:QualifyingProperties></ds:Object>`,
     );
 
-    expect(result.canonicalSignatureValue).toBe(
-      "<ds:SignatureValue>mocked canonicalized value</ds:SignatureValue>",
+    const result = parseTopLevel(xml);
+    expect(result.signatureTimestamp).toBe("AAAA");
+    expect(result.canonicalSignatureValue).toContain("<ds:SignatureValue");
+  });
+
+  it("only reads references from the SignedInfo that is a direct child of the signature", () => {
+    const xml = minimalSignature(
+      reference("doc.txt", "cmVhbA=="),
+      `<ds:Object><ds:SignedInfo>${reference("doc.txt", "b3RoZXI=")}</ds:SignedInfo></ds:Object>`,
     );
-    expect(__mockFromMethod).toHaveBeenCalledWith("http://www.w3.org/2001/10/xml-exc-c14n#");
-    expect(__mockCanonicalize).toHaveBeenCalled();
+
+    const result = parseTopLevel(xml);
+    expect(result.signedChecksums).toEqual({ "doc.txt": "cmVhbA==" });
+  });
+
+  it("rejects a signature with more than one SignedInfo", () => {
+    const xml = `<ds:Signature ${DS}><ds:SignedInfo/><ds:SignedInfo/><ds:SignatureValue>AA</ds:SignatureValue></ds:Signature>`;
+    expect(() => parseTopLevel(xml)).toThrow(/at most one ds:SignedInfo/);
+  });
+
+  it("does not accept SignedInfo from a foreign namespace", () => {
+    const xml = `<ds:Signature ${DS}><x:SignedInfo xmlns:x="urn:example"/><ds:SignatureValue>AA</ds:SignatureValue></ds:Signature>`;
+    expect(() => parseTopLevel(xml)).toThrow(/SignedInfo element not found/);
+  });
+
+  it("accepts file names that match Object.prototype properties", () => {
+    const xml = minimalSignature(
+      `${reference("constructor", "YQ==")}${reference("toString", "Yg==")}`,
+    );
+    const result = parseTopLevel(xml);
+    expect(Object.keys(result.signedChecksums).sort()).toEqual(["constructor", "toString"]);
+    expect(result.signedChecksums.constructor).toBe("YQ==");
+  });
+
+  it("rejects duplicate references to the same file", () => {
+    const xml = minimalSignature(`${reference("doc.txt", "YQ==")}${reference("doc.txt", "Yg==")}`);
+    expect(() => parseTopLevel(xml)).toThrow(/Duplicate reference/);
+  });
+
+  it("does not select signatures nested below the top level", () => {
+    const xml = `<asic:XAdESSignatures xmlns:asic="http://uri.etsi.org/02918/v1.2.1#"><wrapper><ds:Signature ${DS}/></wrapper></asic:XAdESSignatures>`;
+    const doc = createXMLParser().parseFromString(xml, "application/xml");
+    expect(locateTopLevelSignatures(doc)).toHaveLength(0);
   });
 });

@@ -1,42 +1,20 @@
 // src/core/timestamp/verify.ts
 
 import { X509Certificate } from "@peculiar/x509";
-import { AsnConvert } from "@peculiar/asn1-schema";
-import { ContentInfo, SignedData } from "@peculiar/asn1-cms";
-import { TSTInfo } from "@peculiar/asn1-tsp";
 import { Name } from "@peculiar/asn1-x509";
 import { TimestampInfo, TimestampVerificationResult, TimestampVerificationOptions } from "./types";
+import {
+  DecodedTimestampToken,
+  RawCertificate,
+  decodeTimestampToken,
+  findSignerCertificate,
+  getHashAlgorithmName,
+  toRawCertificate,
+  verifyTokenSignature,
+} from "./cms";
 import { checkCertificateRevocation } from "../revocation/check";
 import { RevocationResult } from "../revocation/types";
-import {
-  arrayBufferToHex,
-  arrayBufferToBase64,
-  base64ToArrayBuffer,
-  arrayBufferToPEM,
-} from "../../utils/encoding";
-
-/**
- * OID for SignedData content type
- */
-const id_signedData = "1.2.840.113549.1.7.2";
-
-/**
- * OID for TSTInfo content type
- */
-const id_ct_TSTInfo = "1.2.840.113549.1.9.16.1.4";
-
-/**
- * Get hash algorithm name from OID
- */
-function getHashAlgorithmName(oid: string): string {
-  const hashAlgorithms: Record<string, string> = {
-    "1.3.14.3.2.26": "SHA-1",
-    "2.16.840.1.101.3.4.2.1": "SHA-256",
-    "2.16.840.1.101.3.4.2.2": "SHA-384",
-    "2.16.840.1.101.3.4.2.3": "SHA-512",
-  };
-  return hashAlgorithms[oid] || oid;
-}
+import { arrayBufferToHex, arrayBufferToPEM } from "../../utils/encoding";
 
 /**
  * Common OID to attribute name mappings for X.500 distinguished names
@@ -72,93 +50,73 @@ function formatDirectoryName(name: Name): string {
   return parts.join(", ");
 }
 
+function certificateToPEM(cert: RawCertificate): string {
+  const der = cert.der;
+  return arrayBufferToPEM(
+    der.buffer.slice(der.byteOffset, der.byteOffset + der.byteLength) as ArrayBuffer,
+  );
+}
+
+/**
+ * Build the public TimestampInfo from a decoded token
+ * @param tsaCertificate The certificate identified by the SignerInfo (if any)
+ */
+function buildTimestampInfo(
+  token: DecodedTimestampToken,
+  tsaCertificate: RawCertificate | undefined,
+): TimestampInfo {
+  const { tstInfo } = token;
+
+  // Extract TSA name if present
+  let tsaName: string | undefined;
+  if (tstInfo.tsa) {
+    if (tstInfo.tsa.directoryName) {
+      tsaName = formatDirectoryName(tstInfo.tsa.directoryName);
+    } else if (tstInfo.tsa.uniformResourceIdentifier) {
+      tsaName = tstInfo.tsa.uniformResourceIdentifier;
+    }
+  }
+
+  // Calculate accuracy in seconds (if provided)
+  let accuracy: number | undefined;
+  if (tstInfo.accuracy) {
+    accuracy =
+      (tstInfo.accuracy.seconds || 0) +
+      (tstInfo.accuracy.millis || 0) / 1000 +
+      (tstInfo.accuracy.micros || 0) / 1000000;
+  }
+
+  return {
+    genTime: tstInfo.genTime,
+    policy: tstInfo.policy,
+    serialNumber: arrayBufferToHex(tstInfo.serialNumber),
+    hashAlgorithm: getHashAlgorithmName(tstInfo.messageImprint.hashAlgorithm.algorithm),
+    messageImprint: arrayBufferToHex(tstInfo.messageImprint.hashedMessage.buffer),
+    tsaName,
+    tsaCertificate: tsaCertificate ? certificateToPEM(tsaCertificate) : undefined,
+    accuracy,
+  };
+}
+
 /**
  * Parse RFC 3161 TimeStampToken from base64
+ *
+ * This only decodes the token; it does not verify its signature. Use
+ * verifyTimestamp() before relying on any of the returned values.
+ * `tsaCertificate` is the embedded certificate referenced by the SignerInfo
+ * (issuerAndSerialNumber or subjectKeyIdentifier), if present.
+ *
  * @param timestampBase64 Base64-encoded timestamp token
  * @returns Parsed timestamp info or null if parsing fails
  */
 export function parseTimestamp(timestampBase64: string): TimestampInfo | null {
   try {
-    const tokenBuffer = base64ToArrayBuffer(timestampBase64);
-
-    // Parse as ContentInfo (TimeStampToken extends ContentInfo)
-    const contentInfo = AsnConvert.parse(tokenBuffer, ContentInfo);
-
-    // Verify it's SignedData
-    if (contentInfo.contentType !== id_signedData) {
-      console.warn("Timestamp is not SignedData");
-      return null;
-    }
-
-    // Parse SignedData
-    const signedData = AsnConvert.parse(contentInfo.content, SignedData);
-
-    // Verify encapsulated content is TSTInfo
-    if (signedData.encapContentInfo.eContentType !== id_ct_TSTInfo) {
-      console.warn("SignedData does not contain TSTInfo");
-      return null;
-    }
-
-    // Parse TSTInfo
-    if (!signedData.encapContentInfo.eContent) {
-      console.warn("No eContent in SignedData");
-      return null;
-    }
-
-    // Extract buffer from EncapsulatedContent - it may be in .single (OctetString) or .any (ArrayBuffer)
-    const eContent = signedData.encapContentInfo.eContent;
-    let tstInfoBuffer: ArrayBuffer;
-    if (eContent.single) {
-      // OctetString has a buffer property
-      tstInfoBuffer = eContent.single.buffer;
-    } else if (eContent.any) {
-      tstInfoBuffer = eContent.any;
-    } else {
-      // Try to serialize the whole thing if it's already ASN.1 parsed
-      tstInfoBuffer = AsnConvert.serialize(eContent);
-    }
-
-    const tstInfo = AsnConvert.parse(tstInfoBuffer, TSTInfo);
-
-    // Extract TSA certificate if present
-    let tsaCertificate: string | undefined;
-    if (signedData.certificates && signedData.certificates.length > 0) {
-      // Get the first certificate (usually the TSA cert)
-      const cert = signedData.certificates[0];
-      if ("certificate" in cert && cert.certificate) {
-        tsaCertificate = arrayBufferToPEM(AsnConvert.serialize(cert.certificate));
-      }
-    }
-
-    // Extract TSA name if present
-    let tsaName: string | undefined;
-    if (tstInfo.tsa) {
-      if (tstInfo.tsa.directoryName) {
-        tsaName = formatDirectoryName(tstInfo.tsa.directoryName);
-      } else if (tstInfo.tsa.uniformResourceIdentifier) {
-        tsaName = tstInfo.tsa.uniformResourceIdentifier;
-      }
-    }
-
-    // Calculate accuracy in seconds (if provided)
-    let accuracy: number | undefined;
-    if (tstInfo.accuracy) {
-      accuracy =
-        (tstInfo.accuracy.seconds || 0) +
-        (tstInfo.accuracy.millis || 0) / 1000 +
-        (tstInfo.accuracy.micros || 0) / 1000000;
-    }
-
-    return {
-      genTime: tstInfo.genTime,
-      policy: tstInfo.policy,
-      serialNumber: arrayBufferToHex(tstInfo.serialNumber),
-      hashAlgorithm: getHashAlgorithmName(tstInfo.messageImprint.hashAlgorithm.algorithm),
-      messageImprint: arrayBufferToHex(tstInfo.messageImprint.hashedMessage.buffer),
-      tsaName,
-      tsaCertificate,
-      accuracy,
-    };
+    const token = decodeTimestampToken(timestampBase64);
+    const signerInfo = token.signerInfos[0];
+    const tsaCertificate = signerInfo
+      ? findSignerCertificate(signerInfo.sid, token.certificates)
+      : undefined;
+    return buildTimestampInfo(token, tsaCertificate);
   } catch (error) {
     console.error(
       "Failed to parse timestamp:",
@@ -202,6 +160,9 @@ async function computeHash(data: ArrayBuffer, algorithm: string): Promise<ArrayB
  * Per XAdES (ETSI EN 319 132-1), the SignatureTimeStamp covers the canonicalized
  * ds:SignatureValue XML element, not just its base64 content.
  *
+ * Note: this only compares the message imprint; it does not check the token
+ * signature. verifyTimestamp() performs both checks.
+ *
  * @param timestampInfo Parsed timestamp info
  * @param canonicalSignatureValue Canonicalized ds:SignatureValue XML element
  * @returns True if the timestamp covers the signature
@@ -233,6 +194,21 @@ export async function verifyTimestampCoversSignature(
 
 /**
  * Verify an RFC 3161 timestamp token
+ *
+ * The token is valid only when:
+ * - the TSA certificate referenced by the SignerInfo can be located (in the
+ *   token or in options.certificates)
+ * - the CMS signature verifies with that certificate's public key, the signed
+ *   content-type is id-ct-TSTInfo, the message-digest matches the TSTInfo, and
+ *   any ESS signing-certificate attribute matches the TSA certificate
+ * - the TSA certificate has the id-kp-timeStamping extended key usage
+ * - the message imprint matches options.canonicalSignatureValue (when given)
+ * - with verifyTsaCertificate: the TSA certificate was within its validity
+ *   period at genTime and is not revoked
+ *
+ * Whether the TSA itself is trusted is not decided here; callers should check
+ * info.tsaCertificate against a trust source (e.g. the EU trusted lists).
+ *
  * @param timestampBase64 Base64-encoded timestamp token
  * @param options Verification options
  * @returns Timestamp verification result
@@ -241,23 +217,63 @@ export async function verifyTimestamp(
   timestampBase64: string,
   options: TimestampVerificationOptions = {},
 ): Promise<TimestampVerificationResult> {
-  // Parse the timestamp
-  const info = parseTimestamp(timestampBase64);
-  if (!info) {
+  let token: DecodedTimestampToken;
+  try {
+    token = decodeTimestampToken(timestampBase64);
+  } catch (error) {
+    console.error(
+      "Failed to parse timestamp:",
+      error instanceof Error ? error.message : String(error),
+    );
     return {
       isValid: false,
       reason: "Failed to parse timestamp token",
     };
   }
 
+  const extraCertificates: RawCertificate[] = [];
+  for (const cert of options.certificates ?? []) {
+    try {
+      extraCertificates.push(toRawCertificate(cert));
+    } catch {
+      // Ignore unparseable candidates; they cannot be the TSA certificate
+    }
+  }
+
+  // Verify the CMS signature and identify the TSA certificate
+  const tokenCheck = await verifyTokenSignature(token, extraCertificates);
+  const info = buildTimestampInfo(token, tokenCheck.tsaCertificate);
+  const signatureValid = tokenCheck.signatureValid;
+
+  const problems: string[] = [];
+  if (!signatureValid) {
+    problems.push(tokenCheck.reason || "Timestamp token signature is invalid");
+  }
+
+  // RFC 3161 2.3: the TSA certificate must carry the id-kp-timeStamping EKU.
+  // A certificate without it is not authorised to issue timestamps, so the
+  // token is treated as invalid (all known qualified TSAs set it).
+  if (tokenCheck.tsaCertificate && !tokenCheck.hasTimeStampingUsage) {
+    problems.push("TSA certificate does not have the timeStamping extended key usage");
+  }
+
   // Verify timestamp covers the signature if provided
   let coversSignature: boolean | undefined;
-  let coversSignatureReason: string | undefined;
   if (options.canonicalSignatureValue) {
     coversSignature = await verifyTimestampCoversSignature(info, options.canonicalSignatureValue);
     if (!coversSignature) {
-      coversSignatureReason = "Could not verify timestamp covers signature (hash mismatch)";
+      problems.push("Could not verify timestamp covers signature (hash mismatch)");
     }
+  }
+
+  if (problems.length > 0) {
+    return {
+      isValid: false,
+      info,
+      coversSignature,
+      signatureValid,
+      reason: problems.join("; "),
+    };
   }
 
   // Verify TSA certificate if requested
@@ -273,6 +289,7 @@ export async function verifyTimestamp(
           isValid: false,
           info,
           coversSignature,
+          signatureValid,
           reason: `TSA certificate was not valid at timestamp time (${info.genTime.toISOString()})`,
         };
       }
@@ -288,6 +305,7 @@ export async function verifyTimestamp(
               isValid: false,
               info,
               coversSignature,
+              signatureValid,
               tsaRevocation,
               reason: `TSA certificate has been revoked: ${tsaRevocation.reason || "No reason provided"}`,
             };
@@ -310,6 +328,7 @@ export async function verifyTimestamp(
         isValid: false,
         info,
         coversSignature,
+        signatureValid,
         reason: `Failed to verify TSA certificate: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
@@ -319,14 +338,17 @@ export async function verifyTimestamp(
     isValid: true,
     info,
     coversSignature,
+    signatureValid,
     tsaRevocation,
-    reason: coversSignatureReason,
   };
 }
 
 /**
- * Get the trusted timestamp time from a signature
- * This should be used instead of the self-declared signingTime for certificate validation
+ * Get the timestamp time from a signature
+ *
+ * Note: this only decodes the token. The returned time should only be treated
+ * as trusted after verifyTimestamp() has returned isValid: true.
+ *
  * @param timestampBase64 Base64-encoded timestamp token
  * @returns The timestamp generation time, or null if parsing fails
  */

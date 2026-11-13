@@ -4,9 +4,22 @@ import { checkCertificateValidity, CertificateInfo, parseCertificate } from "./c
 import { createXMLParser, querySelector } from "../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "./canonicalization/XMLCanonicalizer";
 import { SignatureInfo } from "./parser";
+import { parseSignatureElement } from "./parser/signatureParser";
+import {
+  DSIG_NS,
+  getSignatureParts,
+  getSingleDsigChild,
+  isElementNamed,
+  locateTopLevelSignatures,
+} from "./parser/signatureStructure";
+import { verifySignedProperties } from "./signedReferences";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
-import { extractCertsFromOCSPResponses } from "./revocation/ocsp";
+import {
+  extractCertsFromOCSPResponses,
+  parseOCSPResponse,
+  resolveIssuerFromChain,
+} from "./revocation/ocsp";
 import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
@@ -772,8 +785,13 @@ export async function verifyChecksums(
   const checksumPromises = Object.entries(signature.signedChecksums).map(
     async ([filename, expectedChecksum]) => {
       // Get the per-file digest algorithm, or fall back to default
-      const digestAlgorithm = signature.digestAlgorithms?.[filename]
-        ? parseDigestAlgorithmUri(signature.digestAlgorithms[filename])
+      const ownDigestAlgorithm =
+        signature.digestAlgorithms &&
+        Object.prototype.hasOwnProperty.call(signature.digestAlgorithms, filename)
+          ? signature.digestAlgorithms[filename]
+          : undefined;
+      const digestAlgorithm = ownDigestAlgorithm
+        ? parseDigestAlgorithmUri(ownDigestAlgorithm)
         : defaultDigestAlgorithm;
 
       // Check if file exists in the container
@@ -787,7 +805,7 @@ export async function verifyChecksums(
         let foundMatch = false;
         if (basename) {
           for (const [containerFilename, content] of files.entries()) {
-            if (containerFilename.endsWith(basename)) {
+            if (containerFilename === basename || containerFilename.endsWith(`/${basename}`)) {
               // Found a match by basename
               const actualChecksum = await computeDigest(content, digestAlgorithm);
               const matches = expectedChecksum === actualChecksum;
@@ -1025,24 +1043,78 @@ export async function verifySignedInfo(
   algorithm: { name: string; hash: string; namedCurve?: string },
   canonicalizationMethod?: string,
 ): Promise<SignatureVerificationResult> {
+  let signedInfo: Element;
   try {
-    // Parse the SignedInfo XML
+    // Locate the SignedInfo strictly: either the document element itself, or
+    // the ds:SignedInfo child of the document's top-level ds:Signature.
     const parser = createXMLParser();
     const xmlDoc = parser.parseFromString(signatureXml, "application/xml");
-    const signedInfo = querySelector(xmlDoc, "ds:SignedInfo") as any;
-
-    if (!signedInfo) {
-      return {
-        isValid: false,
-        reason: "SignedInfo element not found in provided XML",
-      };
+    const root = xmlDoc.documentElement;
+    if (isElementNamed(root, DSIG_NS, "SignedInfo")) {
+      signedInfo = root;
+    } else {
+      const signatures = locateTopLevelSignatures(xmlDoc);
+      if (signatures.length !== 1) {
+        return {
+          isValid: false,
+          reason:
+            signatures.length === 0
+              ? "SignedInfo element not found in provided XML"
+              : "Expected exactly one top-level Signature element",
+        };
+      }
+      signedInfo = getSignatureParts(signatures[0]).signedInfo;
     }
+  } catch (error) {
+    return {
+      isValid: false,
+      reason: `SignedInfo verification error: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 
+  return verifySignedInfoElement(
+    signedInfo,
+    signatureValue,
+    publicKeyData,
+    algorithm,
+    canonicalizationMethod,
+  );
+}
+
+function getInclusiveNamespacePrefixList(methodElement: Element | null): string[] | undefined {
+  if (!methodElement) {
+    return undefined;
+  }
+  for (let i = 0; i < methodElement.childNodes.length; i++) {
+    const child = methodElement.childNodes[i] as Element;
+    if (child.nodeType === 1 && child.localName === "InclusiveNamespaces") {
+      const prefixList = child.getAttribute("PrefixList")?.trim();
+      return prefixList ? prefixList.split(/\s+/).filter(Boolean) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Verify the signature value over a specific ds:SignedInfo element.
+ */
+export async function verifySignedInfoElement(
+  signedInfo: Element,
+  signatureValue: string,
+  publicKeyData: ArrayBuffer,
+  algorithm: { name: string; hash: string; namedCurve?: string },
+  canonicalizationMethod?: string,
+): Promise<SignatureVerificationResult> {
+  try {
     // Determine canonicalization method
     const c14nMethod = canonicalizationMethod || CANONICALIZATION_METHODS.default;
 
     // Canonicalize the SignedInfo element
-    const canonicalizedSignedInfo = XMLCanonicalizer.canonicalize(signedInfo, c14nMethod);
+    const canonicalizedSignedInfo = XMLCanonicalizer.canonicalize(signedInfo, c14nMethod, {
+      inclusiveNamespacePrefixList: getInclusiveNamespacePrefixList(
+        getSingleDsigChild(signedInfo, "CanonicalizationMethod"),
+      ),
+    });
 
     // Clean up signature value (remove whitespace)
     const cleanSignatureValue = signatureValue.replace(/\s+/g, "");
@@ -1211,6 +1283,169 @@ export async function verifySignedInfo(
   }
 }
 
+function resolveKeyAlgorithm(signatureInfo: SignatureInfo): any {
+  const algorithm = signatureInfo.algorithm || "";
+  const keyAlgorithm: any = {
+    name: "RSASSA-PKCS1-v1_5",
+    hash: "SHA-256",
+  };
+  if (algorithm.includes("ecdsa") && signatureInfo.publicKey?.namedCurve) {
+    keyAlgorithm.namedCurve = signatureInfo.publicKey.namedCurve;
+    keyAlgorithm.name = "ECDSA";
+  }
+  if (algorithm.includes("ecdsa-sha256")) {
+    keyAlgorithm.hash = "SHA-256";
+  } else if (algorithm.includes("ecdsa-sha384")) {
+    keyAlgorithm.hash = "SHA-384";
+  } else if (algorithm.includes("ecdsa-sha512")) {
+    keyAlgorithm.hash = "SHA-512";
+  } else if (algorithm.includes("rsa-sha1")) {
+    keyAlgorithm.hash = "SHA-1";
+  } else if (algorithm.includes("rsa-pss")) {
+    keyAlgorithm.name = "RSA-PSS";
+    keyAlgorithm.saltLength = 32; // Default salt length (adjust based on hash size)
+    if (algorithm.includes("sha384")) {
+      keyAlgorithm.hash = "SHA-384";
+      keyAlgorithm.saltLength = 48;
+    } else if (algorithm.includes("sha512")) {
+      keyAlgorithm.hash = "SHA-512";
+      keyAlgorithm.saltLength = 64;
+    } else {
+      keyAlgorithm.hash = "SHA-256"; // Default
+    }
+  } else if (algorithm.includes("rsa-sha384")) {
+    keyAlgorithm.hash = "SHA-384";
+  } else if (algorithm.includes("rsa-sha512")) {
+    keyAlgorithm.hash = "SHA-512";
+  }
+  return keyAlgorithm;
+}
+
+function formatSignatureError(signatureResult: SignatureVerificationResult): string {
+  let detailedErrorMessage = signatureResult.reason || "XML signature verification failed";
+  if (signatureResult.errorDetails) {
+    const details = signatureResult.errorDetails;
+    detailedErrorMessage += ` [Category: ${details.category}, Environment: ${details.environment}`;
+    if (details.algorithm) {
+      detailedErrorMessage += `, Algorithm: ${details.algorithm.name}`;
+      if (details.algorithm.namedCurve) {
+        detailedErrorMessage += `, Curve: ${details.algorithm.namedCurve}`;
+      }
+    }
+    if (details.keyLength) {
+      detailedErrorMessage += `, Key length: ${details.keyLength} bytes`;
+    }
+    detailedErrorMessage += `]`;
+  }
+  return detailedErrorMessage;
+}
+
+interface LocatedSignature {
+  doc: Document;
+  element: Element;
+  info: SignatureInfo;
+}
+
+/**
+ * Re-locate the signature inside its raw XML and re-derive every
+ * security-relevant field from that exact element, so that the SignedInfo
+ * that is verified, the references that are checked and the certificate that
+ * is used all come from the same ds:Signature.
+ */
+function locateSignature(signatureInfo: SignatureInfo): LocatedSignature {
+  const doc = createXMLParser().parseFromString(signatureInfo.rawXml!, "application/xml");
+  const signatures = locateTopLevelSignatures(doc);
+  if (signatures.length === 0) {
+    throw new Error("No top-level Signature element found");
+  }
+
+  let element = signatures[0];
+  if (signatures.length > 1) {
+    const byId = signatures.filter((sig) => sig.getAttribute("Id") === signatureInfo.id);
+    if (byId.length !== 1) {
+      throw new Error("Could not unambiguously identify the signature in its document");
+    }
+    element = byId[0];
+  }
+
+  const reparsed = parseSignatureElement(element, doc);
+  return { doc, element, info: { ...signatureInfo, ...reparsed, rawXml: signatureInfo.rawXml } };
+}
+
+/** Allowed distance between proof of existence and embedded OCSP thisUpdate */
+const EMBEDDED_OCSP_WINDOW_MS = 24 * 60 * 60 * 1000;
+const EMBEDDED_OCSP_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Long-term validation from revocation data embedded in the signature.
+ *
+ * An embedded OCSP response is accepted as evidence only when it is signed by
+ * the issuer or an authorized responder, is about this certificate, and was
+ * issued at or after the proof-of-existence time (within a bounded window),
+ * which shows the certificate was not revoked when the signature was created.
+ */
+async function checkEmbeddedRevocation(
+  certificatePem: string,
+  embeddedOcsp: string[],
+  issuerCandidates: string[],
+  proofOfExistenceTime: Date,
+): Promise<RevocationResult | null> {
+  if (embeddedOcsp.length === 0) {
+    return null;
+  }
+  const certificate = new X509Certificate(certificatePem);
+  const issuer = await resolveIssuerFromChain(certificate, issuerCandidates);
+  if (!issuer) {
+    return null;
+  }
+
+  const poe = proofOfExistenceTime.getTime();
+  for (const encoded of embeddedOcsp) {
+    try {
+      const der = base64ToUint8Array(encoded);
+      const result = await parseOCSPResponse(
+        der.buffer.slice(der.byteOffset, der.byteOffset + der.byteLength) as ArrayBuffer,
+        certificate,
+        issuer,
+        {
+          now: new Date(poe + EMBEDDED_OCSP_WINDOW_MS / 2),
+          clockSkewMs: EMBEDDED_OCSP_WINDOW_MS / 2,
+        },
+      );
+      const thisUpdate = result.thisUpdate?.getTime();
+      if (
+        thisUpdate === undefined ||
+        thisUpdate < poe - EMBEDDED_OCSP_SKEW_MS ||
+        thisUpdate > poe + EMBEDDED_OCSP_WINDOW_MS
+      ) {
+        continue;
+      }
+      if (result.status === "good" || result.status === "revoked") {
+        return {
+          ...result,
+          embedded: true,
+          reason:
+            result.status === "good"
+              ? `Embedded OCSP response from ${result.thisUpdate!.toISOString()} confirms the certificate was not revoked at signing time`
+              : result.reason,
+        };
+      }
+    } catch {
+      // Try the next embedded response.
+    }
+  }
+  return null;
+}
+
+function getRevocationFetchOptions(options: VerificationOptions): TrustedListFetchOptions {
+  return (
+    options.trustedListFetchOptions ?? {
+      timeout: options.revocationOptions?.ocspTimeout,
+      proxyUrl: options.revocationOptions?.proxyUrl,
+    }
+  );
+}
+
 /**
  * Verify a complete signature (certificate, checksums, and signature)
  * @param signatureInfo Signature information
@@ -1219,7 +1454,7 @@ export async function verifySignedInfo(
  * @returns Complete verification result
  */
 export async function verifySignature(
-  signatureInfo: SignatureInfo,
+  inputSignatureInfo: SignatureInfo,
   files: Map<string, Uint8Array>,
   options: VerificationOptions = {},
 ): Promise<VerificationResult> {
@@ -1229,112 +1464,114 @@ export async function verifySignature(
   let trustListError: string | undefined;
   let timestampTrustListMatch: TrustListMatch | undefined;
   let timestampTrustListError: string | undefined;
+  let issuerVerified = false;
+  let issuerSignatureMismatch = false;
 
-  // Verify timestamp first (if present) to get trusted time for cert validation
-  let trustedSigningTime: Date = options.verifyTime || signatureInfo.signingTime;
+  // Re-derive all fields from the raw XML of the signature (when available).
+  let located: LocatedSignature | undefined;
+  let structureError: string | undefined;
+  if (inputSignatureInfo.rawXml) {
+    try {
+      located = locateSignature(inputSignatureInfo);
+    } catch (error) {
+      structureError = `Invalid signature structure: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  const signatureInfo = located?.info ?? inputSignatureInfo;
+
+  // Verify the signature value and the signed properties first: nothing else
+  // in the signature can be relied upon unless these hold.
+  let signatureResult: SignatureVerificationResult = { isValid: true };
+  let signedPropertiesTime: Date | undefined;
+
+  if (structureError) {
+    signatureResult = { isValid: false, reason: structureError };
+    errors.push(structureError);
+  } else if (
+    options.verifySignatures !== false &&
+    located &&
+    signatureInfo.signatureValue &&
+    signatureInfo.publicKey
+  ) {
+    const parts = getSignatureParts(located.element);
+    signatureResult = await verifySignedInfoElement(
+      parts.signedInfo,
+      signatureInfo.signatureValue,
+      signatureInfo.publicKey.rawData,
+      resolveKeyAlgorithm(signatureInfo),
+      signatureInfo.canonicalizationMethod,
+    );
+
+    if (signatureResult.isValid) {
+      const signerCertificateDer = new Uint8Array(
+        new X509Certificate(signatureInfo.certificatePEM).rawData,
+      );
+      const signedProperties = await verifySignedProperties(
+        located.doc,
+        located.element,
+        parts.references,
+        signerCertificateDer,
+        (data, algorithmUri) => computeDigest(data, algorithmUri),
+      );
+      if (signedProperties.isValid) {
+        signedPropertiesTime = signedProperties.signingTime;
+      } else {
+        signatureResult = {
+          isValid: false,
+          reason: `Signed properties verification failed: ${signedProperties.reason || "unknown reason"}`,
+        };
+      }
+    }
+
+    if (!signatureResult.isValid) {
+      errors.push(formatSignatureError(signatureResult));
+    }
+  } else if (options.verifySignatures !== false) {
+    // Missing information for signature verification
+    const missingComponents = [];
+    if (!signatureInfo.rawXml) missingComponents.push("Signature XML");
+    if (!signatureInfo.signatureValue) missingComponents.push("SignatureValue");
+    if (!signatureInfo.publicKey) missingComponents.push("Public Key");
+
+    errors.push(`Cannot verify XML signature: missing ${missingComponents.join(", ")}`);
+    signatureResult = {
+      isValid: false,
+      reason: `Missing required components: ${missingComponents.join(", ")}`,
+    };
+  }
+
+  // The claimed signing time is only meaningful once the signed properties
+  // have been verified. It is reported, but never used as proof of time.
+  if (signedPropertiesTime) {
+    signatureInfo.signingTime = signedPropertiesTime;
+  }
+
+  // Verify the timestamp (if present). Only a valid timestamp that covers this
+  // signature - and, when a trusted list is configured, comes from a trusted
+  // timestamp authority - provides proof of existence.
+  const validationTime = options.verifyTime ?? new Date();
+  let proofOfExistenceTime: Date | undefined;
 
   if (signatureInfo.signatureTimestamp && options.verifyTimestamps !== false) {
     timestampResult = await verifyTimestamp(signatureInfo.signatureTimestamp, {
       canonicalSignatureValue: signatureInfo.canonicalSignatureValue,
+      // TSA certificate candidates when the token does not embed its own
+      // (e.g. supplied in XAdES CertificateValues); the token's sid selects one
+      certificates: signatureInfo.certificateChain,
       verifyTsaCertificate: true,
       revocationOptions: options.revocationOptions,
     });
 
-    if (timestampResult.isValid && timestampResult.info) {
-      // Use timestamp time as the trusted signing time
-      trustedSigningTime = timestampResult.info.genTime;
-    } else if (!timestampResult.isValid) {
+    if (!timestampResult.isValid) {
       errors.push(`Timestamp verification failed: ${timestampResult.reason || "Unknown reason"}`);
     }
-  }
 
-  // Verify certificate (time validity) - use trusted timestamp time if available
-  const certResult = await verifyCertificate(signatureInfo.certificatePEM, trustedSigningTime);
-  const certificateValidityAtSigningTime = {
-    isValid: certResult.isValid,
-    reason: certResult.reason,
-  };
-
-  // If certificate validation failed, add detailed error
-  if (!certResult.isValid) {
-    const certErrorMsg = `Certificate validation error: ${certResult.reason || "Unknown reason"}`;
-    errors.push(certErrorMsg);
-  }
-
-  // Check certificate revocation (default: enabled)
-  if (options.checkRevocation !== false && certResult.isValid) {
-    try {
-      // Certificates carried inside embedded OCSP responses are a useful source of
-      // the issuer cert, letting the lightweight live OCSP query succeed (and
-      // avoiding a full CRL download) when the container's chain is empty.
-      const revocationChain = [
-        ...(signatureInfo.certificateChain ?? []),
-        ...extractCertsFromOCSPResponses(signatureInfo.revocationValues?.ocsp ?? []),
-      ];
-      const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
-        certificateChain: revocationChain.length > 0 ? revocationChain : undefined,
-        ...options.revocationOptions,
-      });
-
-      certResult.revocation = revocationResult;
-
-      // If certificate is revoked, check if signature was made before revocation (LTV)
-      if (revocationResult.status === "revoked") {
-        const revokedAt = revocationResult.revokedAt;
-        const hasValidRevocationTime = revokedAt && revokedAt.getTime() > 0;
-
-        // Long-Term Validation: if we have a trusted timestamp proving the signature
-        // was made before revocation, the signature is still valid
-        if (hasValidRevocationTime && trustedSigningTime < revokedAt) {
-          // Signature was made before revocation - still valid (LTV)
-          certResult.revocation.isValid = true;
-          certResult.revocation.reason = `Certificate was revoked on ${revokedAt.toISOString()}, but signature was made on ${trustedSigningTime.toISOString()} (before revocation)`;
-        } else {
-          // Signature was made after revocation or no valid revocation date available
-          certResult.isValid = false;
-          const revokedAtStr = hasValidRevocationTime ? ` on ${revokedAt.toISOString()}` : "";
-          certResult.reason =
-            revocationResult.reason || `Certificate has been revoked${revokedAtStr}`;
-          errors.push(revocationResult.reason || `Certificate revoked${revokedAtStr}`);
-        }
-      }
-      // Note: 'unknown' status is a soft fail - certificate remains valid
-      // but user can check revocation.status to see the actual status
-    } catch (error) {
-      // Revocation check failed - soft fail, add to result but don't invalidate
-      certResult.revocation = {
-        isValid: false,
-        status: "error",
-        method: "none",
-        reason: `Revocation check failed: ${error instanceof Error ? error.message : String(error)}`,
-        checkedAt: new Date(),
-      };
-    }
-  }
-
-  if (options.trustListProvider) {
-    try {
-      const issuerIdentity = await extractIssuerIdentityFromCertificate(
-        signatureInfo.certificatePEM,
-        {
-          certificateChain: signatureInfo.certificateChain,
-          fetchOptions: options.trustedListFetchOptions,
-        },
-      );
-
-      trustListMatch = await options.trustListProvider.match({
-        purpose: "signature_issuer",
-        subjectDn: issuerIdentity.issuerSubjectDn,
-        skiHex: issuerIdentity.authorityKeyIdentifierHex,
-        spkiSha256Hex: issuerIdentity.issuerCertificate?.spkiSha256Hex,
-        time: trustedSigningTime,
-      });
-    } catch (error) {
-      trustListError = `Trusted list check failed: ${error instanceof Error ? error.message : String(error)}`;
-      errors.push(trustListError);
-    }
-
-    if (timestampResult?.info?.tsaCertificate && timestampResult.info.genTime) {
+    if (
+      options.trustListProvider &&
+      timestampResult.isValid &&
+      timestampResult.info?.tsaCertificate &&
+      timestampResult.info.genTime
+    ) {
       try {
         const tsaIdentity = await extractCertificateIdentityFromCertificate(
           timestampResult.info.tsaCertificate,
@@ -1352,108 +1589,147 @@ export async function verifySignature(
         errors.push(timestampTrustListError);
       }
     }
+
+    const timestampTrusted =
+      !options.trustListProvider ||
+      (timestampTrustListMatch?.trustedAtTime === true &&
+        timestampTrustListMatch.confidence === "exact");
+
+    if (
+      timestampResult.isValid &&
+      timestampResult.coversSignature === true &&
+      timestampResult.info?.genTime &&
+      timestampTrusted
+    ) {
+      proofOfExistenceTime = timestampResult.info.genTime;
+    }
+  }
+
+  // Certificate validity and revocation are evaluated at the proven signing
+  // time when there is proof of existence, otherwise at the validation time.
+  const trustedSigningTime: Date = proofOfExistenceTime ?? validationTime;
+
+  // Verify certificate (time validity)
+  const certResult = await verifyCertificate(signatureInfo.certificatePEM, trustedSigningTime);
+  const certificateValidityAtSigningTime = {
+    isValid: certResult.isValid,
+    reason: certResult.reason,
+  };
+
+  if (!certResult.isValid) {
+    errors.push(`Certificate validation error: ${certResult.reason || "Unknown reason"}`);
+  }
+
+  // Certificates embedded in the signature or in its embedded OCSP responses
+  // are candidate issuers. Candidates are only used once they are shown to
+  // have signed the certificate.
+  const issuerCandidates = [
+    ...(signatureInfo.certificateChain ?? []),
+    ...extractCertsFromOCSPResponses(signatureInfo.revocationValues?.ocsp ?? []),
+  ];
+
+  // Check certificate revocation (default: enabled)
+  if (options.checkRevocation !== false && certResult.isValid) {
+    try {
+      const revocationResult = await checkCertificateRevocation(signatureInfo.certificatePEM, {
+        certificateChain: issuerCandidates.length > 0 ? issuerCandidates : undefined,
+        ...options.revocationOptions,
+      });
+
+      certResult.revocation = revocationResult;
+
+      // When live revocation data cannot answer (e.g. the certificate has long
+      // expired and the CA no longer publishes status for it), fall back to
+      // verified revocation data embedded in the signature at signing time.
+      if (
+        proofOfExistenceTime &&
+        revocationResult.status !== "good" &&
+        revocationResult.status !== "revoked"
+      ) {
+        const embedded = await checkEmbeddedRevocation(
+          signatureInfo.certificatePEM,
+          signatureInfo.revocationValues?.ocsp ?? [],
+          issuerCandidates,
+          proofOfExistenceTime,
+        );
+        if (embedded) {
+          certResult.revocation = embedded;
+        }
+      }
+
+      if (certResult.revocation.status === "revoked") {
+        const revocationResult = certResult.revocation;
+        const revokedAt = revocationResult.revokedAt;
+        const hasValidRevocationTime = revokedAt && revokedAt.getTime() > 0;
+
+        // Long-term validation: only proof of existence (a trusted timestamp)
+        // can show that the signature was created before revocation.
+        if (proofOfExistenceTime && hasValidRevocationTime && proofOfExistenceTime < revokedAt) {
+          certResult.revocation.isValid = true;
+          certResult.revocation.reason = `Certificate was revoked on ${revokedAt.toISOString()}, but the signature is proven to exist on ${proofOfExistenceTime.toISOString()} (before revocation)`;
+        } else {
+          certResult.isValid = false;
+          const revokedAtStr = hasValidRevocationTime ? ` on ${revokedAt.toISOString()}` : "";
+          certResult.reason =
+            revocationResult.reason || `Certificate has been revoked${revokedAtStr}`;
+          errors.push(revocationResult.reason || `Certificate revoked${revokedAtStr}`);
+        }
+      }
+    } catch (error) {
+      certResult.revocation = {
+        isValid: false,
+        status: "error",
+        method: "none",
+        reason: `Revocation check failed: ${error instanceof Error ? error.message : String(error)}`,
+        checkedAt: new Date(),
+      };
+    }
+  }
+
+  if (options.trustListProvider) {
+    try {
+      const issuerIdentity = await extractIssuerIdentityFromCertificate(
+        signatureInfo.certificatePEM,
+        {
+          certificateChain: issuerCandidates,
+          fetchOptions: getRevocationFetchOptions(options),
+        },
+      );
+      issuerVerified = !!issuerIdentity.issuerCertificate;
+      issuerSignatureMismatch = issuerIdentity.issuerSignatureMismatch === true;
+
+      trustListMatch = await options.trustListProvider.match({
+        purpose: "signature_issuer",
+        subjectDn: issuerIdentity.issuerSubjectDn,
+        skiHex: issuerIdentity.authorityKeyIdentifierHex,
+        spkiSha256Hex: issuerIdentity.issuerCertificate?.spkiSha256Hex,
+        time: trustedSigningTime,
+      });
+    } catch (error) {
+      trustListError = `Trusted list check failed: ${error instanceof Error ? error.message : String(error)}`;
+      errors.push(trustListError);
+    }
   }
 
   // Verify checksums
-  const checksumResult =
+  let checksumResult: ChecksumVerificationResult =
     options.verifyChecksums !== false
       ? await verifyChecksums(signatureInfo, files)
       : { isValid: true, details: {} };
+  if (
+    options.verifyChecksums !== false &&
+    Object.keys(signatureInfo.signedChecksums).length === 0
+  ) {
+    checksumResult = { isValid: false, details: {} };
+  }
   const checksumFailureDetail = checksumResult.isValid
     ? undefined
-    : getFailedChecksumDetail(checksumResult);
+    : Object.keys(checksumResult.details).length === 0
+      ? "Signature does not cover any files"
+      : getFailedChecksumDetail(checksumResult);
 
-  // If checksum validation failed, add detailed error
   if (checksumFailureDetail) {
     errors.push(checksumFailureDetail);
-  }
-
-  // Verify XML signature if we have the necessary components
-  let signatureResult: SignatureVerificationResult = { isValid: true };
-
-  if (
-    options.verifySignatures !== false &&
-    signatureInfo.rawXml &&
-    signatureInfo.signatureValue &&
-    signatureInfo.publicKey
-  ) {
-    // Determine algorithm
-    const algorithm = signatureInfo.algorithm || "";
-    const keyAlgorithm: any = {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: "SHA-256",
-    };
-    if (algorithm.includes("ecdsa") && signatureInfo.publicKey.namedCurve) {
-      keyAlgorithm.namedCurve = signatureInfo.publicKey.namedCurve;
-      keyAlgorithm.name = "ECDSA";
-    }
-    if (algorithm.includes("ecdsa-sha256")) {
-      keyAlgorithm.hash = "SHA-256";
-    } else if (algorithm.includes("ecdsa-sha384")) {
-      keyAlgorithm.hash = "SHA-384";
-    } else if (algorithm.includes("ecdsa-sha512")) {
-      keyAlgorithm.hash = "SHA-512";
-    } else if (algorithm.includes("rsa-sha1")) {
-      keyAlgorithm.hash = "SHA-1";
-    } else if (algorithm.includes("rsa-pss")) {
-      keyAlgorithm.name = "RSA-PSS";
-      keyAlgorithm.saltLength = 32; // Default salt length (adjust based on hash size)
-      if (algorithm.includes("sha384")) {
-        keyAlgorithm.hash = "SHA-384";
-        keyAlgorithm.saltLength = 48;
-      } else if (algorithm.includes("sha512")) {
-        keyAlgorithm.hash = "SHA-512";
-        keyAlgorithm.saltLength = 64;
-      } else {
-        keyAlgorithm.hash = "SHA-256"; // Default
-      }
-    } else if (algorithm.includes("rsa-sha384")) {
-      keyAlgorithm.hash = "SHA-384";
-    } else if (algorithm.includes("rsa-sha512")) {
-      keyAlgorithm.hash = "SHA-512";
-    }
-    signatureResult = await verifySignedInfo(
-      signatureInfo.rawXml,
-      signatureInfo.signatureValue,
-      signatureInfo.publicKey.rawData,
-      keyAlgorithm,
-      signatureInfo.canonicalizationMethod,
-    );
-
-    // If signature validation failed, add detailed error
-    if (!signatureResult.isValid) {
-      // Format a detailed error message with the error details
-      let detailedErrorMessage = signatureResult.reason || "XML signature verification failed";
-
-      // Add error details if available
-      if (signatureResult.errorDetails) {
-        const details = signatureResult.errorDetails;
-        detailedErrorMessage += ` [Category: ${details.category}, Environment: ${details.environment}`;
-        if (details.algorithm) {
-          detailedErrorMessage += `, Algorithm: ${details.algorithm.name}`;
-          if (details.algorithm.namedCurve) {
-            detailedErrorMessage += `, Curve: ${details.algorithm.namedCurve}`;
-          }
-        }
-        if (details.keyLength) {
-          detailedErrorMessage += `, Key length: ${details.keyLength} bytes`;
-        }
-        detailedErrorMessage += `]`;
-      }
-      errors.push(detailedErrorMessage);
-    }
-  } else if (options.verifySignatures !== false) {
-    // Missing information for signature verification
-    const missingComponents = [];
-    if (!signatureInfo.rawXml) missingComponents.push("Signature XML");
-    if (!signatureInfo.signatureValue) missingComponents.push("SignatureValue");
-    if (!signatureInfo.publicKey) missingComponents.push("Public Key");
-
-    errors.push(`Cannot verify XML signature: missing ${missingComponents.join(", ")}`);
-    signatureResult = {
-      isValid: false,
-      reason: `Missing required components: ${missingComponents.join(", ")}`,
-    };
   }
 
   // Determine overall validity
@@ -1472,7 +1748,6 @@ export async function verifySignature(
   const limitations: ValidationLimitation[] = [];
 
   if (!isValid) {
-    // Check for platform unsupported (RSA key size)
     if (signatureResult.unsupportedPlatform) {
       status = "UNSUPPORTED";
       statusMessage = signatureResult.reason;
@@ -1481,21 +1756,14 @@ export async function verifySignature(
         description: signatureResult.reason || "RSA key size not supported",
         platform: "Safari/WebKit",
       });
-    }
-    // Check for checksum failure (definitely invalid)
-    else if (!checksumResult.isValid) {
+    } else if (!checksumResult.isValid) {
       status = "INVALID";
-      statusMessage = "File integrity check failed";
-    }
-    // Check for signature crypto failure with supported key
-    else if (!signatureResult.isValid && !signatureResult.unsupportedPlatform) {
+      statusMessage = checksumFailureDetail || "File integrity check failed";
+    } else if (!signatureResult.isValid) {
       status = "INVALID";
       statusMessage = signatureResult.reason || "Signature verification failed";
-    }
-    // Check for certificate issues
-    else if (!certResult.isValid) {
-      // If cert expired and no valid timestamp, it's indeterminate
-      if (certResult.reason?.includes("expired") && !timestampResult?.isValid) {
+    } else if (!certResult.isValid) {
+      if (certResult.reason?.includes("expired") && !proofOfExistenceTime) {
         status = "INDETERMINATE";
         statusMessage = "Certificate expired and no valid timestamp proof";
         limitations.push({
@@ -1510,9 +1778,7 @@ export async function verifySignature(
         status = "INDETERMINATE";
         statusMessage = certResult.reason || "Certificate validation inconclusive";
       }
-    }
-    // Timestamp parsing/verification failed - can't establish POE
-    else if (timestampResult && !timestampResult.isValid) {
+    } else if (timestampResult && !timestampResult.isValid) {
       status = "INDETERMINATE";
       statusMessage = timestampResult.reason || "Timestamp verification failed";
       limitations.push({
@@ -1520,46 +1786,84 @@ export async function verifySignature(
         description:
           timestampResult.reason || "Could not verify timestamp to establish proof of existence",
       });
-    }
-    // Revocation unknown
-    else if (certResult.revocation?.status === "unknown") {
-      status = "INDETERMINATE";
-      statusMessage = "Certificate revocation status could not be determined";
-      limitations.push({
-        code: "REVOCATION_UNKNOWN",
-        description:
-          certResult.revocation.reason || "Could not check certificate revocation status",
-      });
-    }
-    // Fallback
-    else {
+    } else {
       status = "INVALID";
       statusMessage = errors[0] || "Verification failed";
     }
   }
 
-  // If everything else is valid but the issuer is not on the trusted list,
-  // downgrade from VALID to INDETERMINATE — crypto is sound but trust is unconfirmed
-  if (status === "VALID" && options.trustListProvider) {
-    if (trustListMatch && (!trustListMatch.found || trustListMatch.trustedAtTime === false)) {
-      status = "INDETERMINATE";
-      isValid = false;
-      statusMessage = trustListMatch.found
-        ? "Signer issuer found in trusted list but was not trusted at signing time"
-        : "Signer issuer not found in trusted list";
-      limitations.push({
-        code: "ISSUER_NOT_TRUSTED",
-        description: statusMessage,
-      });
-    } else if (!trustListMatch && trustListError) {
-      status = "INDETERMINATE";
-      isValid = false;
-      statusMessage = "Trusted list check failed";
-      limitations.push({
-        code: "TRUST_LIST_CHECK_FAILED",
-        description: trustListError,
-      });
+  const downgrade = (code: string, message: string, description = message) => {
+    status = "INDETERMINATE";
+    isValid = false;
+    statusMessage = message;
+    limitations.push({ code, description });
+  };
+
+  if (status === "VALID") {
+    // Revocation must be positively established when it was requested.
+    const revocationStatus = certResult.revocation?.status;
+    if (
+      options.checkRevocation !== false &&
+      revocationStatus !== "good" &&
+      revocationStatus !== "revoked"
+    ) {
+      downgrade(
+        "REVOCATION_UNKNOWN",
+        "Certificate revocation status could not be determined",
+        certResult.revocation?.reason || "Could not check certificate revocation status",
+      );
     }
+  }
+
+  if ((status === "VALID" || status === "INDETERMINATE") && issuerSignatureMismatch) {
+    // The issuer named in the signer certificate is available, but its key did
+    // not sign the signer certificate.
+    status = "INVALID";
+    isValid = false;
+    statusMessage = "Signer certificate was not issued by the certificate authority it names";
+  }
+
+  if (status === "VALID") {
+    if (!options.trustListProvider) {
+      downgrade(
+        "TRUST_NOT_CHECKED",
+        "Signer certificate trust was not checked (no trusted-list provider configured)",
+      );
+    } else if (!trustListMatch && trustListError) {
+      downgrade("TRUST_LIST_CHECK_FAILED", "Trusted list check failed", trustListError);
+    } else if (!trustListMatch || !trustListMatch.found || trustListMatch.trustedAtTime === false) {
+      downgrade(
+        "ISSUER_NOT_TRUSTED",
+        trustListMatch?.found
+          ? "Signer issuer found in trusted list but was not trusted at signing time"
+          : "Signer issuer not found in trusted list",
+      );
+    } else if (!issuerVerified || trustListMatch.confidence !== "exact") {
+      downgrade(
+        "ISSUER_NOT_VERIFIED",
+        "Signer certificate could not be cryptographically linked to a trusted-list certificate",
+        issuerVerified
+          ? "The certificate that issued the signer certificate is not the certificate listed in the trusted list"
+          : "The issuer certificate was not available to verify the signer certificate's signature",
+      );
+    } else if (trustListMatch.trustedAtTime !== true) {
+      downgrade("ISSUER_NOT_TRUSTED", "Signer issuer trust at signing time could not be confirmed");
+    }
+  }
+
+  if (
+    status === "VALID" &&
+    options.trustListProvider &&
+    timestampResult?.isValid &&
+    !proofOfExistenceTime
+  ) {
+    downgrade(
+      "TIMESTAMP_AUTHORITY_NOT_TRUSTED",
+      "Timestamp authority is not trusted",
+      timestampTrustListError ||
+        timestampTrustListMatch?.detail ||
+        "Timestamp authority not found in trusted list",
+    );
   }
 
   const checklist = options.includeChecklist
@@ -1579,7 +1883,6 @@ export async function verifySignature(
       })
     : undefined;
 
-  // Return the complete result
   return {
     isValid,
     status,

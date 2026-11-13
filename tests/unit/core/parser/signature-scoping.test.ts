@@ -14,20 +14,24 @@ function buildSignature(id: string, marker: string): string {
         <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
         <ds:DigestValue>digest-${marker}</ds:DigestValue>
       </ds:Reference>
+      <ds:Reference Type="http://uri.etsi.org/01903#SignedProperties" URI="#${id}-SignedProperties">
+        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <ds:DigestValue>sp-digest-${marker}</ds:DigestValue>
+      </ds:Reference>
     </ds:SignedInfo>
     <ds:SignatureValue>sigval-${marker}</ds:SignatureValue>
     <ds:Object><xades:QualifyingProperties>
-      <xades:SignedProperties><xades:SignedSignatureProperties>
+      <xades:SignedProperties Id="${id}-SignedProperties"><xades:SignedSignatureProperties>
         <xades:SigningTime>${marker === "FIRST" ? "2021-01-01T00:00:00Z" : "2022-02-02T00:00:00Z"}</xades:SigningTime>
       </xades:SignedSignatureProperties></xades:SignedProperties>
-      <xades:UnsignedSignatureProperties>
+      <xades:UnsignedProperties><xades:UnsignedSignatureProperties>
         <xades:CertificateValues>
           <xades:EncapsulatedX509Certificate>CERT-${marker}</xades:EncapsulatedX509Certificate>
         </xades:CertificateValues>
         <xades:RevocationValues><xades:OCSPValues>
           <xades:EncapsulatedOCSPValue>OCSP-${marker}</xades:EncapsulatedOCSPValue>
         </xades:OCSPValues></xades:RevocationValues>
-      </xades:UnsignedSignatureProperties>
+      </xades:UnsignedSignatureProperties></xades:UnsignedProperties>
     </xades:QualifyingProperties></ds:Object>
   </ds:Signature>`;
 }

@@ -53,7 +53,21 @@ Use `revocationOptions.proxyUrl` in browsers because OCSP and CRL endpoints usua
 - `trustListMatch`: signer-issuer trust-list result when `trustListProvider` is configured
 - `timestampTrustListMatch`: timestamp-authority trust-list result when `trustListProvider` is configured
 
-`allowWeakDnOnlyTrustMatch` is off by default, so DN-only trusted-list matches remain `indeterminate`.
+`VALID` requires all of the following:
+
+- the signature value verifies over the signature's own `SignedInfo`, every referenced file matches its digest, and the signature covers at least one file
+- the XAdES `SignedProperties` are covered by the signature and their `SigningCertificate` matches the signer certificate
+- a `trustListProvider` is configured, and the signer certificate was issued (cryptographically verified) by a certificate listed in the trusted list, trusted at the validation time
+- revocation status is established (live OCSP/CRL, or a verified OCSP response embedded in the signature for long-term validation), unless `checkRevocation: false`
+- a signature timestamp, if present, verifies, covers the signature and comes from a trusted timestamp authority
+
+Proof of time comes only from a verified, trusted signature timestamp. The `SigningTime` claimed by the signer is reported but never used to evaluate certificate expiry or revocation; without a timestamp they are evaluated at the validation time (`verifyTime`, default now).
+
+Without a `trustListProvider` the result is `INDETERMINATE` with the `TRUST_NOT_CHECKED` limitation: the signature is intact (`signature.isValid`, `checksums.isValid`), but the signer is not established. Other limitation codes include `ISSUER_NOT_TRUSTED`, `ISSUER_NOT_VERIFIED`, `REVOCATION_UNKNOWN`, `TIMESTAMP_AUTHORITY_NOT_TRUSTED`, `TIMESTAMP_VERIFICATION_FAILED` and `CERT_EXPIRED_NO_POE`.
+
+`allowWeakDnOnlyTrustMatch` is off by default, so DN-only trusted-list matches remain `indeterminate` in the checklist; they never produce `VALID`.
+
+`parseEdoc(buffer, options)` rejects containers with unsafe entry names (absolute paths, `..` segments, duplicates) and enforces size limits (`maxEntries`, `maxEntrySize`, `maxTotalSize`; see `DEFAULT_PARSE_EDOC_LIMITS`).
 
 ## Trusted List Setup
 

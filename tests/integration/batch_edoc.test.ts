@@ -54,9 +54,9 @@ const PUBLIC_SAMPLE_CHECKLIST_EXPECTATIONS: Record<string, PublicSampleChecklist
       issuer_trusted_at_signing_time: "pass",
     },
     trustListMatch: {
-      confidence: "ski_dn",
+      confidence: "exact",
       country: "LV",
-      detailIncludes: "issuer match by SKI + DN",
+      detailIncludes: "issuer match by SPKI",
     },
   },
   "terms_of_Account_Agreement_28062025_ENG.asice": {
@@ -222,6 +222,7 @@ const verifyEdocFiles = async (
       const verificationResult = await verifySignature(signature, container.files, {
         verifyTime: signature.signingTime,
         checkRevocation: false,
+        trustListProvider,
       });
 
       // Track status from verification result
@@ -580,7 +581,7 @@ const verifyUntrustedIssuer = (dir: string) => {
   );
 
   (testEnvFileExists ? it : it.skip)(
-    "should return VALID without trust list provider (crypto-only check)",
+    "should return INDETERMINATE without trust list provider (crypto-only check)",
     async () => {
       const edocBuffer = readFileSync(testEnvFile);
       const container = parseEdoc(edocBuffer);
@@ -591,9 +592,15 @@ const verifyUntrustedIssuer = (dir: string) => {
         checkRevocation: false,
       });
 
-      // Without trust list, crypto-valid signatures should be VALID
-      expect(result.isValid).toBe(true);
-      expect(result.status).toBe("VALID");
+      // Without a trust list, crypto-valid signatures are INDETERMINATE: the
+      // signature is intact but the signer's certificate is not established
+      expect(result.signature?.isValid).toBe(true);
+      expect(result.checksums.isValid).toBe(true);
+      expect(result.isValid).toBe(false);
+      expect(result.status).toBe("INDETERMINATE");
+      expect(result.limitations).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "TRUST_NOT_CHECKED" })]),
+      );
     },
   );
 };

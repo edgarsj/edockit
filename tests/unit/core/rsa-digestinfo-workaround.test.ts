@@ -1,3 +1,4 @@
+import { constants, createHash, generateKeyPairSync, privateEncrypt, webcrypto } from "crypto";
 import { verifyRsaWithNonStandardDigestInfo } from "../../../src/core/rsa-digestinfo-workaround";
 
 /**
@@ -114,5 +115,166 @@ describe("RSA DigestInfo Workaround (Node.js)", () => {
     );
 
     expect(result).toBe(false);
+  });
+});
+
+/**
+ * Strictness checks for the recovered block.
+ *
+ * A throwaway RSA key (e = 3) is generated and raw RSA (no padding) is used to
+ * produce signatures over hand-built blocks, so that both well-formed and
+ * malformed DigestInfo layouts can be checked. Each case runs against the
+ * Node.js path (crypto.publicDecrypt) and the BigInt path used in browsers.
+ */
+describe("RSA DigestInfo Workaround (strict block layout)", () => {
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    publicExponent: 3,
+  });
+  const spkiBuffer = publicKey.export({ type: "spki", format: "der" });
+  const spki = spkiBuffer.buffer.slice(
+    spkiBuffer.byteOffset,
+    spkiBuffer.byteOffset + spkiBuffer.byteLength,
+  ) as ArrayBuffer;
+  const keyLength = 256;
+
+  const data = new TextEncoder().encode("Data covered by the signature");
+  const sha1 = new Uint8Array(createHash("sha1").update(data).digest());
+  const sha256 = new Uint8Array(createHash("sha256").update(data).digest());
+
+  const SHA1_OID = [0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a];
+  const SHA256_OID = [0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
+
+  function digestInfo(oid: number[], hash: Uint8Array, withNull: boolean): number[] {
+    const algId = withNull ? [...oid, 0x05, 0x00] : [...oid];
+    const algSeq = [0x30, algId.length, ...algId];
+    const digest = [0x04, hash.length, ...hash];
+    return [0x30, algSeq.length + digest.length, ...algSeq, ...digest];
+  }
+
+  /** Build 00 01 FF..FF 00 || payload, filling the block to the key length */
+  function padType1(payload: number[]): number[] {
+    const ffCount = keyLength - 3 - payload.length;
+    return [0x00, 0x01, ...new Array(ffCount).fill(0xff), 0x00, ...payload];
+  }
+
+  /** Raw RSA private operation over a full-length block */
+  function rawSign(block: number[]): Uint8Array {
+    expect(block.length).toBe(keyLength);
+    return new Uint8Array(
+      privateEncrypt({ key: privateKey, padding: constants.RSA_NO_PADDING }, Buffer.from(block)),
+    );
+  }
+
+  const modes: Array<[string, boolean]> = [
+    ["Node.js path", false],
+    ["BigInt path", true],
+  ];
+
+  describe.each(modes)("%s", (_label, useBigIntPath) => {
+    const g = globalThis as any;
+    let previousWindow: unknown;
+
+    beforeAll(() => {
+      previousWindow = g.window;
+      if (useBigIntPath) {
+        g.window = { crypto: webcrypto };
+      }
+    });
+
+    afterAll(() => {
+      if (previousWindow === undefined) {
+        delete g.window;
+      } else {
+        g.window = previousWindow;
+      }
+    });
+
+    const verify = (sig: Uint8Array, hashAlgorithm = "SHA-1") =>
+      verifyRsaWithNonStandardDigestInfo(spki, sig, data, hashAlgorithm);
+
+    it("accepts the standard DigestInfo encoding", async () => {
+      const sig = rawSign(padType1(digestInfo(SHA1_OID, sha1, true)));
+      expect(await verify(sig)).toBe(true);
+    });
+
+    it("accepts the DigestInfo encoding without NULL parameters", async () => {
+      const sig = rawSign(padType1(digestInfo(SHA1_OID, sha1, false)));
+      expect(await verify(sig)).toBe(true);
+    });
+
+    it("accepts both encodings for SHA-256", async () => {
+      const withNull = rawSign(padType1(digestInfo(SHA256_OID, sha256, true)));
+      const withoutNull = rawSign(padType1(digestInfo(SHA256_OID, sha256, false)));
+      expect(await verify(withNull, "SHA-256")).toBe(true);
+      expect(await verify(withoutNull, "SHA-256")).toBe(true);
+    });
+
+    it("rejects a correct DigestInfo followed by extra bytes", async () => {
+      const payload = [...digestInfo(SHA1_OID, sha1, false), 0x00, 0x12, 0x34, 0x56];
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+    });
+
+    it("rejects extra bytes between the padding and the DigestInfo", async () => {
+      const payload = [0xab, 0xcd, ...digestInfo(SHA1_OID, sha1, true)];
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+    });
+
+    it("rejects a matching digest surrounded by arbitrary bytes", async () => {
+      const payload = [
+        ...new Array(40).fill(0x5a),
+        0x04,
+        sha1.length,
+        ...sha1,
+        ...new Array(40).fill(0xa5),
+      ];
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+    });
+
+    it("rejects a bare OCTET STRING without the algorithm identifier", async () => {
+      const payload = [0x04, sha1.length, ...sha1];
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+    });
+
+    it("rejects a DigestInfo whose OID does not match the expected hash", async () => {
+      // SHA-256 OID wrapping the SHA-1 value
+      const payload = digestInfo(SHA256_OID, sha1, true);
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+      // SHA-1 DigestInfo checked as SHA-256
+      const sig = rawSign(padType1(digestInfo(SHA1_OID, sha1, true)));
+      expect(await verify(sig, "SHA-256")).toBe(false);
+    });
+
+    it("rejects a DigestInfo with non-minimal length encoding", async () => {
+      // Outer SEQUENCE length written in long form (81 xx) instead of short form
+      const inner = digestInfo(SHA1_OID, sha1, false).slice(2);
+      const payload = [0x30, 0x81, inner.length, ...inner];
+      expect(await verify(rawSign(padType1(payload)))).toBe(false);
+    });
+
+    it("rejects padding that contains bytes other than 0xFF", async () => {
+      const block = padType1(digestInfo(SHA1_OID, sha1, true));
+      block[20] = 0x7f;
+      expect(await verify(rawSign(block))).toBe(false);
+    });
+
+    it("rejects padding shorter than eight 0xFF bytes", async () => {
+      // 00 01 FF*4 00, then filler, then the DigestInfo
+      const di = digestInfo(SHA1_OID, sha1, true);
+      const filler = new Array(keyLength - 7 - di.length).fill(0x00);
+      const block = [0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0x00, ...filler, ...di];
+      expect(await verify(rawSign(block))).toBe(false);
+    });
+
+    it("rejects block type 2", async () => {
+      const block = padType1(digestInfo(SHA1_OID, sha1, true));
+      block[1] = 0x02;
+      expect(await verify(rawSign(block))).toBe(false);
+    });
+
+    it("rejects unsupported hash algorithm names", async () => {
+      const sig = rawSign(padType1(digestInfo(SHA1_OID, sha1, true)));
+      expect(await verify(sig, "MD5")).toBe(false);
+    });
   });
 });

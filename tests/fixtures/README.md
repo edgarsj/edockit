@@ -15,6 +15,7 @@ For integration tests to pass, place the following files in the sensitive direct
 ### Why eDoc Files Often Contain Sensitive Data
 
 Latvian eDoc files typically contain identifying information about the signers:
+
 - Each eDoc usually contains the signer's full name and personal identification number
 - These personal identifiers cannot be stored in Git without that person's consent
 - Documents signed with company certificates rather than personal certificates are welcome for testing purposes
@@ -46,11 +47,7 @@ Files in this main fixtures directory (/tests/fixtures/) are committed to the re
 Browser tests use `filelist.json` files to discover test files since browser environments can't access the filesystem directly. These JSON files are simple arrays listing the filenames in each directory:
 
 ```json
-[
-  "example1.edoc",
-  "example2.asice",
-  "example3.edoc"
-]
+["example1.edoc", "example2.asice", "example3.edoc"]
 ```
 
 ### Maintaining File Lists
