@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Trusted-list match source** - `TrustListMatch` now carries `source` / `sourceLabel` identifying the LOTL a matched service was published through (`"eu"` or `"ades"` with the default sources), so applications can distinguish third-country trusted lists (AdES LOTL) from EU/EEA ones. Compact bundles store this as an optional seventh element (source index) per service; older bundles remain readable
+
 ### Changed
 
 - **Stricter validation status** - `VALID` now requires a configured `trustListProvider` and an issuer certificate that cryptographically issued the signer certificate and is listed in the trusted list (SPKI match). Without a provider the status is `INDETERMINATE` (`TRUST_NOT_CHECKED`); a SKI/DN-only match is `INDETERMINATE` (`ISSUER_NOT_VERIFIED`); an available issuer certificate that did not sign the signer certificate is `INVALID`

@@ -165,8 +165,16 @@ export function createEmptyTrustedListBundle(): CompactTrustedListBundle {
 
 export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedListData {
   const services: TrustedListEntry[] = bundle.services.map((serviceRecord) => {
-    const [spkiSha256Base64Url, skiBase64Url, subjectDnIdx, country, purposeMask, trustIntervals] =
-      serviceRecord;
+    const [
+      spkiSha256Base64Url,
+      skiBase64Url,
+      subjectDnIdx,
+      country,
+      purposeMask,
+      trustIntervals,
+      sourceIdx,
+    ] = serviceRecord;
+    const source = sourceIdx !== undefined ? bundle.sources[sourceIdx] : undefined;
 
     const subjectDn = bundle.dns[subjectDnIdx];
     if (subjectDn === undefined) {
@@ -178,6 +186,7 @@ export function buildTrustedListData(bundle: CompactTrustedListBundle): TrustedL
       spkiSha256Hex: base64UrlToHex(spkiSha256Base64Url),
       subjectDn: normalizeDistinguishedName(subjectDn),
       country,
+      ...(source ? { source: source[0], sourceLabel: source[1] } : {}),
       purposeMask,
       trustIntervals: hydrateTrustIntervals(trustIntervals),
     };
@@ -206,6 +215,7 @@ export function buildCompactTrustedListBundle(
   const distinguishedNameCodebook = new Map<string, number>();
   const dns: string[] = [];
   const compactServiceMap = new Map<string, CompactTrustedService>();
+  const sourceIndexById = new Map(sources.map((source, index) => [source.id, index]));
 
   const getDistinguishedNameCode = (value: string) => {
     const existing = distinguishedNameCodebook.get(value);
@@ -235,12 +245,14 @@ export function buildCompactTrustedListBundle(
       continue;
     }
 
+    const sourceIdx = sourceIndexById.get(service.source);
     const compactServiceKey = JSON.stringify([
       hexToBase64Url(service.spkiSha256Hex),
       hexToBase64Url(service.skiHex),
       subjectDn,
       service.country,
       trustIntervals,
+      sourceIdx ?? null,
     ]);
 
     const existingService = compactServiceMap.get(compactServiceKey);
@@ -256,7 +268,8 @@ export function buildCompactTrustedListBundle(
       service.country,
       purposeMask,
       trustIntervals,
-    ]);
+      ...(sourceIdx !== undefined ? [sourceIdx] : []),
+    ] as CompactTrustedService);
   }
 
   return {
@@ -302,7 +315,19 @@ export function mergeForwardUnreachableTerritories(
       dns.push(subjectDn);
       dnIndex.set(subjectDn, index);
     }
-    return [service[0], service[1], index, service[3], service[4], service[5]];
+    const previousSource = service[6] !== undefined ? previous.sources[service[6]] : undefined;
+    const sourceIdx = previousSource
+      ? fresh.sources.findIndex(([id]) => id === previousSource[0])
+      : -1;
+    return [
+      service[0],
+      service[1],
+      index,
+      service[3],
+      service[4],
+      service[5],
+      ...(sourceIdx >= 0 ? [sourceIdx] : []),
+    ] as CompactTrustedService;
   });
 
   return {

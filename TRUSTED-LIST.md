@@ -113,6 +113,8 @@ interface TrustListMatch {
   trustedAtTime?: boolean;
   confidence?: "exact" | "ski_dn" | "dn_only";
   country?: string;
+  source?: string; // e.g. "eu" or "ades"
+  sourceLabel?: string;
   detail?: string;
 }
 
@@ -126,6 +128,7 @@ Notes:
 - `purpose` distinguishes signer-issuer matching from timestamp-authority matching.
 - `time` is required because trust-list answers are historical.
 - `subjectDn` should be the normalized X.500 DN used by the matcher.
+- `source` identifies the list of trusted lists the matched service was published through. With the default sources, `"eu"` is the EU LOTL (EU/EEA national trusted lists) and `"ades"` is the AdES LOTL: trusted lists of third countries (currently e.g. Egypt, Moldova, Ukraine) notified to the EU to help validate their signatures as EU advanced signatures. Services from `"ades"` are not equivalent to EU qualified trust services, so applications should label them accordingly. Bundles generated before this field existed omit it.
 - `dn_only` matches are weak evidence. `verifySignature()` keeps them `indeterminate` unless `allowWeakDnOnlyTrustMatch` is enabled.
 
 ## Remote API Example

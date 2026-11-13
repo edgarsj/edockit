@@ -220,3 +220,70 @@ describe("trusted-list matcher", () => {
     expect(match.detail).toContain("not trusted at the requested time");
   });
 });
+
+describe("trusted-list match source", () => {
+  const sources: TrustedListSource[] = [
+    { id: "eu", label: "EU LOTL", lotlUrl: "https://example.test/eu-lotl.xml" },
+    { id: "ades", label: "AdES LOTL", lotlUrl: "https://example.test/ades-lotl.xml" },
+  ];
+  const service = (source: string, country: string, spki: string): TrustedService => ({
+    skiHex: null,
+    spkiSha256Hex: spki,
+    subjectDn: `CN=CA ${country},C=${country}`,
+    country,
+    tspName: "TSP",
+    serviceType: "CA/QC",
+    source,
+    sourceLabel: source === "eu" ? "EU LOTL" : "AdES LOTL",
+    history: [{ status: "granted", from: "2024-01-01T00:00:00Z", to: null }],
+  });
+
+  it("reports which trusted-list source a match came from", () => {
+    const bundle = buildCompactTrustedListBundle(
+      [service("eu", "LV", "aa11"), service("ades", "EG", "bb22")],
+      sources,
+      "2026-03-14T00:00:00Z",
+    );
+    const data = buildTrustedListData(JSON.parse(JSON.stringify(bundle)));
+    const query = (spkiSha256Hex: string, country: string) =>
+      matchTrustListQuery(
+        {
+          purpose: "signature_issuer",
+          subjectDn: `CN=CA ${country},C=${country}`,
+          spkiSha256Hex,
+          time: new Date("2025-01-01T00:00:00Z"),
+        },
+        data,
+      );
+
+    expect(query("aa11", "LV")).toMatchObject({ found: true, source: "eu", country: "LV" });
+    expect(query("bb22", "EG")).toMatchObject({
+      found: true,
+      source: "ades",
+      sourceLabel: "AdES LOTL",
+      country: "EG",
+    });
+  });
+
+  it("omits the source for bundles without source indexes", () => {
+    const bundle = buildCompactTrustedListBundle(
+      [service("eu", "LV", "aa11")],
+      sources,
+      "2026-03-14T00:00:00Z",
+    );
+    bundle.services = bundle.services.map(
+      (record) => record.slice(0, 6) as unknown as (typeof bundle.services)[number],
+    );
+    const match = matchTrustListQuery(
+      {
+        purpose: "signature_issuer",
+        subjectDn: "CN=CA LV,C=LV",
+        spkiSha256Hex: "aa11",
+        time: new Date("2025-01-01T00:00:00Z"),
+      },
+      buildTrustedListData(bundle),
+    );
+    expect(match.found).toBe(true);
+    expect(match.source).toBeUndefined();
+  });
+});
