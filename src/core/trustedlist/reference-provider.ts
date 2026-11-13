@@ -14,7 +14,8 @@ export interface CreateTrustListProviderFromUrlOptions {
 }
 
 export type CreateTrustListProviderOptions =
-  CreateTrustListProviderFromDataOptions | CreateTrustListProviderFromUrlOptions;
+  | CreateTrustListProviderFromDataOptions
+  | CreateTrustListProviderFromUrlOptions;
 
 function isTrustedListData(
   value: CompactTrustedListBundle | TrustedListData,

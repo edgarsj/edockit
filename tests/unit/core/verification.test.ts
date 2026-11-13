@@ -230,6 +230,10 @@ describe("Signature Verification", () => {
         },
       },
     );
+    expect(mockVerifyTimestamp).toHaveBeenCalledWith(
+      "mock-timestamp-token",
+      expect.objectContaining({ certificates: signatureInfo.certificateChain }),
+    );
     expect(mockExtractCertificateIdentityFromCertificate).toHaveBeenCalledWith(
       "-----BEGIN CERTIFICATE-----\nmock-tsa-certificate\n-----END CERTIFICATE-----",
     );

@@ -1550,6 +1550,9 @@ export async function verifySignature(
   if (signatureInfo.signatureTimestamp && options.verifyTimestamps !== false) {
     timestampResult = await verifyTimestamp(signatureInfo.signatureTimestamp, {
       canonicalSignatureValue: signatureInfo.canonicalSignatureValue,
+      // TSA certificate candidates when the token does not embed its own
+      // (e.g. supplied in XAdES CertificateValues); the token's sid selects one
+      certificates: signatureInfo.certificateChain,
       verifyTsaCertificate: true,
       revocationOptions: options.revocationOptions,
     });

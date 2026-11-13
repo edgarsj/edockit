@@ -488,8 +488,8 @@ class XMLCanonicalizer {
             // Special handling for base64 content
             result += text.replace(/\r/g, "&#xD;");
           } else {
-            // Use the original text exactly as it was
-            result += child._originalText || text;
+            // Character data is escaped per Canonical XML (&, <, >, CR)
+            result += XMLCanonicalizer.escapeText(child._originalText || text);
           }
 
           lastWasElement = false;
