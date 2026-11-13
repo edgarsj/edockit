@@ -770,6 +770,7 @@ export async function parseOCSPResponse(
         status: "good",
         method: "ocsp",
         checkedAt,
+        thisUpdate: singleResponse.thisUpdate,
       };
     } else if (certStatus.revoked) {
       return {
@@ -782,6 +783,7 @@ export async function parseOCSPResponse(
             : "Certificate revoked",
         revokedAt: certStatus.revoked.revocationTime,
         checkedAt,
+        thisUpdate: singleResponse.thisUpdate,
       };
     } else if (certStatus.unknown !== undefined) {
       return fail("unknown", "OCSP responder does not know about this certificate");

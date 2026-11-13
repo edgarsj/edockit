@@ -15,7 +15,11 @@ import {
 import { verifySignedProperties } from "./signedReferences";
 import { fixRSAModulusPadding } from "./rsa-modulus-padding-fix";
 import { checkCertificateRevocation } from "./revocation/check";
-import { extractCertsFromOCSPResponses } from "./revocation/ocsp";
+import {
+  extractCertsFromOCSPResponses,
+  parseOCSPResponse,
+  resolveIssuerFromChain,
+} from "./revocation/ocsp";
 import { RevocationResult, RevocationCheckOptions } from "./revocation/types";
 import { verifyTimestamp } from "./timestamp/verify";
 import { TimestampVerificationResult } from "./timestamp/types";
@@ -1363,6 +1367,71 @@ function locateSignature(signatureInfo: SignatureInfo): LocatedSignature {
   return { doc, element, info: { ...signatureInfo, ...reparsed, rawXml: signatureInfo.rawXml } };
 }
 
+/** Allowed distance between proof of existence and embedded OCSP thisUpdate */
+const EMBEDDED_OCSP_WINDOW_MS = 24 * 60 * 60 * 1000;
+const EMBEDDED_OCSP_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Long-term validation from revocation data embedded in the signature.
+ *
+ * An embedded OCSP response is accepted as evidence only when it is signed by
+ * the issuer or an authorized responder, is about this certificate, and was
+ * issued at or after the proof-of-existence time (within a bounded window),
+ * which shows the certificate was not revoked when the signature was created.
+ */
+async function checkEmbeddedRevocation(
+  certificatePem: string,
+  embeddedOcsp: string[],
+  issuerCandidates: string[],
+  proofOfExistenceTime: Date,
+): Promise<RevocationResult | null> {
+  if (embeddedOcsp.length === 0) {
+    return null;
+  }
+  const certificate = new X509Certificate(certificatePem);
+  const issuer = await resolveIssuerFromChain(certificate, issuerCandidates);
+  if (!issuer) {
+    return null;
+  }
+
+  const poe = proofOfExistenceTime.getTime();
+  for (const encoded of embeddedOcsp) {
+    try {
+      const der = base64ToUint8Array(encoded);
+      const result = await parseOCSPResponse(
+        der.buffer.slice(der.byteOffset, der.byteOffset + der.byteLength) as ArrayBuffer,
+        certificate,
+        issuer,
+        {
+          now: new Date(poe + EMBEDDED_OCSP_WINDOW_MS / 2),
+          clockSkewMs: EMBEDDED_OCSP_WINDOW_MS / 2,
+        },
+      );
+      const thisUpdate = result.thisUpdate?.getTime();
+      if (
+        thisUpdate === undefined ||
+        thisUpdate < poe - EMBEDDED_OCSP_SKEW_MS ||
+        thisUpdate > poe + EMBEDDED_OCSP_WINDOW_MS
+      ) {
+        continue;
+      }
+      if (result.status === "good" || result.status === "revoked") {
+        return {
+          ...result,
+          embedded: true,
+          reason:
+            result.status === "good"
+              ? `Embedded OCSP response from ${result.thisUpdate!.toISOString()} confirms the certificate was not revoked at signing time`
+              : result.reason,
+        };
+      }
+    } catch {
+      // Try the next embedded response.
+    }
+  }
+  return null;
+}
+
 function getRevocationFetchOptions(options: VerificationOptions): TrustedListFetchOptions {
   return (
     options.trustedListFetchOptions ?? {
@@ -1561,7 +1630,27 @@ export async function verifySignature(
 
       certResult.revocation = revocationResult;
 
-      if (revocationResult.status === "revoked") {
+      // When live revocation data cannot answer (e.g. the certificate has long
+      // expired and the CA no longer publishes status for it), fall back to
+      // verified revocation data embedded in the signature at signing time.
+      if (
+        proofOfExistenceTime &&
+        revocationResult.status !== "good" &&
+        revocationResult.status !== "revoked"
+      ) {
+        const embedded = await checkEmbeddedRevocation(
+          signatureInfo.certificatePEM,
+          signatureInfo.revocationValues?.ocsp ?? [],
+          issuerCandidates,
+          proofOfExistenceTime,
+        );
+        if (embedded) {
+          certResult.revocation = embedded;
+        }
+      }
+
+      if (certResult.revocation.status === "revoked") {
+        const revocationResult = certResult.revocation;
         const revokedAt = revocationResult.revokedAt;
         const hasValidRevocationTime = revokedAt && revokedAt.getTime() > 0;
 

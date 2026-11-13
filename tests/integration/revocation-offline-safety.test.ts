@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { unzipSync, zipSync } from "fflate";
 import { parseEdoc } from "../../src/core/parser";
 import { verifySignature } from "../../src/core/verification";
 import { createBundledTrustListProvider } from "../../src/core/trustedlist/bundled-provider";
@@ -7,9 +8,27 @@ import { createBundledTrustListProvider } from "../../src/core/trustedlist/bundl
 const sampleFilePath = join(__dirname, "../fixtures/valid_samples/SampleFile.edoc");
 
 // Embedded XAdES RevocationValues live in UnsignedSignatureProperties, so they are
-// NOT covered by the signature and can be tampered with. They must never short-circuit
-// the revocation verdict to "good" without authentication. When revocation cannot be
-// checked (e.g. offline), the result must be INDETERMINATE, not a pass.
+// NOT covered by the signature and can be tampered with. They may only be used as
+// revocation evidence after the OCSP response itself has been verified (signature,
+// responder authorization, CertID, time relative to the signature timestamp).
+function tamperEmbeddedOcsp(): Uint8Array {
+  const files = unzipSync(new Uint8Array(readFileSync(sampleFilePath)));
+  const signaturePath = Object.keys(files).find((name) => name.includes("signatures"))!;
+  const xml = new TextDecoder()
+    .decode(files[signaturePath])
+    .replace(
+      /(<xades:EncapsulatedOCSPValue[^>]*>)([\s\S]*?)(<\/xades:EncapsulatedOCSPValue>)/,
+      (_match, open: string, value: string, close: string) => {
+        const der = Buffer.from(value.replace(/\s+/g, ""), "base64");
+        // Flip a bit in the responder's signature (the end of the structure)
+        der[der.length - 1] ^= 0x01;
+        return `${open}${der.toString("base64")}${close}`;
+      },
+    );
+  files[signaturePath] = new TextEncoder().encode(xml);
+  return zipSync(files);
+}
+
 describe("revocation safety with embedded (unauthenticated) data", () => {
   let fetchSpy: jest.SpyInstance;
 
@@ -22,12 +41,23 @@ describe("revocation safety with embedded (unauthenticated) data", () => {
     fetchSpy.mockRestore();
   });
 
-  it("does not trust embedded revocation data: offline revocation is indeterminate, not pass", async () => {
+  it("uses an embedded OCSP response only after verifying it", async () => {
     const container = parseEdoc(new Uint8Array(readFileSync(sampleFilePath)));
     const sig = container.signatures[0];
-    // The fixture carries an embedded "good" OCSP response that, if trusted blindly,
-    // would make revocation pass with no network.
     expect(sig.revocationValues?.ocsp.length).toBeGreaterThanOrEqual(1);
+
+    const result = await verifySignature(sig, container.files, {
+      includeChecklist: true,
+      trustListProvider: createBundledTrustListProvider(),
+    });
+
+    expect(result.certificate.revocation).toMatchObject({ status: "good", embedded: true });
+    expect(result.status).toBe("VALID");
+  });
+
+  it("does not trust a tampered embedded OCSP response: offline revocation is indeterminate", async () => {
+    const container = parseEdoc(tamperEmbeddedOcsp());
+    const sig = container.signatures[0];
 
     const result = await verifySignature(sig, container.files, {
       includeChecklist: true,
@@ -39,6 +69,7 @@ describe("revocation safety with embedded (unauthenticated) data", () => {
     );
     expect(revocationItem!.status).toBe("indeterminate");
     expect(result.certificate.revocation?.status).not.toBe("good");
+    expect(result.status).toBe("INDETERMINATE");
   });
 
   it("still verifies everything that does not depend on revocation, offline", async () => {

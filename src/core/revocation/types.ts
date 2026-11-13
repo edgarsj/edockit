@@ -16,6 +16,10 @@ export interface RevocationResult {
   revokedAt?: Date;
   /** When this revocation check was performed */
   checkedAt: Date;
+  /** thisUpdate of the OCSP/CRL data the status was taken from (when available) */
+  thisUpdate?: Date;
+  /** Whether the status was established from revocation data embedded in the signature */
+  embedded?: boolean;
 }
 
 /**
