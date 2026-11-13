@@ -158,3 +158,45 @@ describe("resolveTrustedListFetchUrl", () => {
     ).toBe("http://example.test/tl.xml");
   });
 });
+
+describe("trusted-list redirects", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  async function fetchWithRedirect(allowInsecureHttp?: boolean): Promise<string[]> {
+    const requested: string[] = [];
+    globalThis.fetch = jest.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === SOURCE.lotlUrl) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "http://mirror.example.test/lotl.xml" },
+        });
+      }
+      return new Response("<TrustServiceStatusList/>", { status: 200 });
+    }) as typeof fetch;
+
+    await fetchTrustedListBundleWithDiagnostics([SOURCE], { allowInsecureHttp }).catch(
+      () => undefined,
+    );
+    return requested;
+  }
+
+  it("applies the HTTPS-only rule to redirect targets", async () => {
+    expect(await fetchWithRedirect()).toEqual([
+      SOURCE.lotlUrl,
+      "https://mirror.example.test/lotl.xml",
+    ]);
+  });
+
+  it("follows plain-HTTP redirect targets only when allowed", async () => {
+    expect(await fetchWithRedirect(true)).toEqual([
+      SOURCE.lotlUrl,
+      "http://mirror.example.test/lotl.xml",
+    ]);
+  });
+});

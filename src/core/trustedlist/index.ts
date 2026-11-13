@@ -51,7 +51,72 @@ export interface TrustedListFetchResult {
   diagnostics: TrustedListFetchDiagnostics;
 }
 
+const MAX_TRUSTED_LIST_REDIRECTS = 5;
+
+/**
+ * Fetch a LOTL/TSL document directly, following redirects manually so the
+ * HTTPS-only rule (see resolveTrustedListFetchUrl) applies to every hop, not
+ * just the initial URL.
+ */
+async function fetchXmlDirect(url: string, options: TrustedListFetchOptions): Promise<ArrayBuffer> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeout ?? 10000);
+
+  try {
+    let currentUrl = url;
+    for (let hop = 0; hop <= MAX_TRUSTED_LIST_REDIRECTS; hop++) {
+      const response = await fetch(currentUrl, {
+        headers: { Accept: "application/xml, text/xml;q=0.9, */*;q=0.8" },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("Location");
+        if (!location) {
+          throw new Error(`HTTP ${response.status} redirect without a Location header`);
+        }
+        if (hop === MAX_TRUSTED_LIST_REDIRECTS) {
+          throw new Error("Too many redirects");
+        }
+        const nextUrl = new URL(location, currentUrl).toString();
+        if (!/^https?:\/\//i.test(nextUrl)) {
+          throw new Error(`Redirect to unsupported URL "${nextUrl}"`);
+        }
+        currentUrl = resolveTrustedListFetchUrl(nextUrl, options);
+        continue;
+      }
+
+      if (response.type === "opaqueredirect") {
+        throw new Error("Redirects cannot be inspected in this environment");
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.arrayBuffer();
+    }
+    throw new Error("Too many redirects");
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timeout after ${options.timeout ?? 10000}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchXml(url: string, options: TrustedListFetchOptions = {}): Promise<string> {
+  if (!options.proxyUrl) {
+    try {
+      return new TextDecoder().decode(await fetchXmlDirect(url, options));
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch "${url}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   const result = await fetchBinary(url, {
     timeout: options.timeout ?? 10000,
     accept: "application/xml, text/xml;q=0.9, */*;q=0.8",
