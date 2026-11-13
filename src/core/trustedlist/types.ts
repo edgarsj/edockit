@@ -73,6 +73,9 @@ export interface TrustedListEntry {
   spkiSha256Hex: string | null;
   subjectDn: string;
   country: string;
+  /** Id of the LOTL source the service was published through (e.g. "eu", "ades") */
+  source?: string;
+  sourceLabel?: string;
   purposeMask: TrustListPurposeMask;
   trustIntervals: TrustedTrustInterval[];
 }
@@ -139,6 +142,8 @@ export type CompactTrustedService = [
   country: string,
   purposeMask: TrustListPurposeMask,
   trustIntervals: CompactTrustedInterval[],
+  /** Index into `sources` of the LOTL the service was published through (optional for older bundles) */
+  sourceIdx?: number,
 ];
 
 export type CompactTrustedListSource = [id: string, label: string, lotlUrl: string];

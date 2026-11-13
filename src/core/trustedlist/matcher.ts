@@ -77,11 +77,16 @@ function buildTrustMatch(
   query: TrustListQuery,
   confidence: "exact" | "ski_dn" | "dn_only",
 ): TrustListMatch {
+  const sourceFields = service.source
+    ? { source: service.source, sourceLabel: service.sourceLabel }
+    : {};
+
   if (!query.time) {
     return {
       found: true,
       confidence,
       country: service.country,
+      ...sourceFields,
       detail: `Matching ${getMatchSubjectLabel(query.purpose)} found, but no verification time was provided`,
     };
   }
@@ -92,6 +97,7 @@ function buildTrustMatch(
       found: true,
       confidence,
       country: service.country,
+      ...sourceFields,
       detail: `Matching ${getMatchSubjectLabel(query.purpose)} found, but service was not trusted at the requested time`,
       trustedAtTime: false,
     };
@@ -102,6 +108,7 @@ function buildTrustMatch(
     trustedAtTime: true,
     confidence,
     country: service.country,
+    ...sourceFields,
     detail:
       confidence === "dn_only"
         ? buildWeakDnOnlyDetail(query.purpose)

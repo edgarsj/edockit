@@ -15,6 +15,14 @@ export interface TrustListMatch {
   trustedAtTime?: boolean;
   confidence?: TrustMatchConfidence;
   country?: string;
+  /**
+   * Id of the trusted-list source of the matched service. With the default
+   * sources this is "eu" (EU/EEA national trusted lists) or "ades" (third-country
+   * lists notified to the EU for AdES validation, which are not equivalent to
+   * EU qualified status).
+   */
+  source?: string;
+  sourceLabel?: string;
   detail?: string;
 }
 
