@@ -107,6 +107,38 @@ class XMLCanonicalizer {
     this.method = method;
   }
 
+  /** Escape text node content per Canonical XML (&, <, >, CR). */
+  static escapeText(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\r/g, "&#xD;");
+  }
+
+  /** Escape attribute values per Canonical XML (&, <, ", TAB, LF, CR). */
+  static escapeAttribute(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;")
+      .replace(/\t/g, "&#x9;")
+      .replace(/\n/g, "&#xA;")
+      .replace(/\r/g, "&#xD;");
+  }
+
+  /** Compare attributes by namespace URI, then local name (code point order). */
+  static compareAttributes(a: Attr, b: Attr): number {
+    const nsA = a.namespaceURI || "";
+    const nsB = b.namespaceURI || "";
+    if (nsA !== nsB) {
+      return nsA < nsB ? -1 : 1;
+    }
+    const nameA = a.localName || a.name;
+    const nameB = b.localName || b.name;
+    return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+  }
+
   static escapeXml(text: string): string {
     return text
       .replace(/&/g, "&amp;")
@@ -406,10 +438,10 @@ class XMLCanonicalizer {
         }
       }
 
-      attrArray.sort((a, b) => a.name.localeCompare(b.name));
+      attrArray.sort(XMLCanonicalizer.compareAttributes);
 
       for (const attr of attrArray) {
-        result += ` ${attr.name}="${XMLCanonicalizer.escapeXml(attr.value)}"`;
+        result += ` ${attr.name}="${XMLCanonicalizer.escapeAttribute(attr.value)}"`;
       }
 
       result += ">";
@@ -496,7 +528,7 @@ class XMLCanonicalizer {
     } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
       // For standalone text nodes
       const text = node._originalText || node.nodeValue || "";
-      result += XMLCanonicalizer.escapeXml(text);
+      result += XMLCanonicalizer.escapeText(text);
     }
 
     return result;
@@ -516,17 +548,56 @@ class XMLCanonicalizer {
     if (node.nodeType === NODE_TYPES.ELEMENT_NODE) {
       const element = node as Element & NodeWithWhitespace;
 
-      // First, collect all namespaces that are visible at this point
-      const allVisibleNamespaces = XMLCanonicalizer.collectNamespaces(element);
+      // Namespaces in scope for this element (nearest declaration wins)
+      const inScopeNamespaces = XMLCanonicalizer.collectNamespaces(element);
+      // Namespaces already rendered by output ancestors
+      const renderedNamespaces = isStartingNode ? new Map<string, string>() : visibleNamespaces;
 
-      // Then, determine which namespaces are actually used in this subtree
-      const usedNamespaces = isStartingNode
-        ? XMLCanonicalizer.collectUsedNamespaces(
-            element,
-            allVisibleNamespaces,
-            inclusiveNamespacePrefixList,
-          )
-        : new Map<string, string>(); // For child elements, don't add any more namespaces
+      // Exclusive XML Canonicalization: a namespace declaration is rendered on
+      // an element only if the element visibly utilizes it (element or
+      // attribute prefix) or it is listed in InclusiveNamespaces, and it has
+      // not already been rendered with the same value by an output ancestor.
+      const neededNamespaces = new Map<string, string>();
+      const elementPrefix = element.prefix || "";
+      const elementNamespace = element.namespaceURI || "";
+      if (elementPrefix) {
+        neededNamespaces.set(elementPrefix, elementNamespace);
+      } else if (elementNamespace || (renderedNamespaces.get("") ?? "") !== "") {
+        neededNamespaces.set("", elementNamespace);
+      }
+
+      for (let i = 0; i < element.attributes.length; i++) {
+        const attr = element.attributes[i];
+        if (attr.name === "xmlns" || attr.name.startsWith("xmlns:")) {
+          continue;
+        }
+        const attrPrefix = attr.prefix || (attr.name.includes(":") ? attr.name.split(":")[0] : "");
+        if (attrPrefix && attrPrefix !== "xml") {
+          const uri = attr.namespaceURI || inScopeNamespaces.get(attrPrefix);
+          if (uri) {
+            neededNamespaces.set(attrPrefix, uri);
+          }
+        }
+      }
+
+      for (const listedPrefix of inclusiveNamespacePrefixList) {
+        const key = listedPrefix === "#default" ? "" : listedPrefix;
+        const uri = inScopeNamespaces.get(key);
+        if (uri !== undefined && !neededNamespaces.has(key)) {
+          neededNamespaces.set(key, uri);
+        }
+      }
+
+      const namespacesToRender = Array.from(neededNamespaces.entries())
+        .filter(([nsPrefix, uri]) => {
+          if (nsPrefix === "" && uri === "" && !renderedNamespaces.has("")) {
+            return false;
+          }
+          return renderedNamespaces.get(nsPrefix) !== uri;
+        })
+        .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+      const usedNamespaces = new Map<string, string>(namespacesToRender);
 
       // Start the element opening tag
       const prefix = element.prefix || "";
@@ -535,20 +606,11 @@ class XMLCanonicalizer {
 
       result += "<" + qName;
 
-      // Add namespace declarations for used namespaces (only at the top level)
-      if (isStartingNode) {
-        const nsEntries = Array.from(usedNamespaces.entries()).sort((a, b) => {
-          if (a[0] === "") return -1;
-          if (b[0] === "") return 1;
-          return a[0].localeCompare(b[0]);
-        });
-
-        for (const [prefix, uri] of nsEntries) {
-          if (prefix === "") {
-            result += ` xmlns="${uri}"`;
-          } else {
-            result += ` xmlns:${prefix}="${uri}"`;
-          }
+      for (const [nsPrefix, uri] of namespacesToRender) {
+        if (nsPrefix === "") {
+          result += ` xmlns="${XMLCanonicalizer.escapeAttribute(uri)}"`;
+        } else {
+          result += ` xmlns:${nsPrefix}="${XMLCanonicalizer.escapeAttribute(uri)}"`;
         }
       }
 
@@ -563,10 +625,10 @@ class XMLCanonicalizer {
         }
       }
 
-      attrArray.sort((a, b) => a.name.localeCompare(b.name));
+      attrArray.sort(XMLCanonicalizer.compareAttributes);
 
       for (const attr of attrArray) {
-        result += ` ${attr.name}="${XMLCanonicalizer.escapeXml(attr.value)}"`;
+        result += ` ${attr.name}="${XMLCanonicalizer.escapeAttribute(attr.value)}"`;
       }
 
       result += ">";
@@ -585,14 +647,14 @@ class XMLCanonicalizer {
             result += text.replace(/\r/g, "&#xD;");
           } else {
             // Regular text handling
-            result += XMLCanonicalizer.escapeXml(text);
+            result += XMLCanonicalizer.escapeText(text);
           }
         } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
           // Recursively process child elements
           // For child elements, we pass the namespaces from the parent but mark as non-root
           result += this.canonicalizeExclusive(
             child,
-            new Map([...visibleNamespaces, ...usedNamespaces]), // Pass all namespaces to children
+            new Map([...renderedNamespaces, ...usedNamespaces]), // Namespaces rendered so far
             {
               inclusiveNamespacePrefixList,
               isStartingNode: false, // Mark as non-starting node
@@ -606,7 +668,7 @@ class XMLCanonicalizer {
     } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
       // Handle standalone text node
       const text = node.nodeValue || "";
-      result += XMLCanonicalizer.escapeXml(text);
+      result += XMLCanonicalizer.escapeText(text);
     }
 
     return result;
