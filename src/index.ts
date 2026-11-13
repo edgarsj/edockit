@@ -1,4 +1,9 @@
-import { parseEdoc, SignatureInfo } from "./core/parser";
+import {
+  parseEdoc,
+  SignatureInfo,
+  ParseEdocOptions,
+  DEFAULT_PARSE_EDOC_LIMITS,
+} from "./core/parser";
 import {
   XMLCanonicalizer,
   CANONICALIZATION_METHODS,
@@ -27,6 +32,8 @@ export {
   // Core functionality
   parseEdoc,
   SignatureInfo,
+  ParseEdocOptions,
+  DEFAULT_PARSE_EDOC_LIMITS,
 
   // Canonicalization
   XMLCanonicalizer,

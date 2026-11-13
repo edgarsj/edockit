@@ -2,20 +2,17 @@
 import { X509Certificate } from "@peculiar/x509";
 import * as XmlParserModule from "../../utils/xmlParser";
 
-import {
-  createXMLParser,
-  querySelector,
-  querySelectorAll,
-  queryByXPath,
-  serializeToXML,
-} from "../../utils/xmlParser";
+import { createXMLParser } from "../../utils/xmlParser";
 import { XMLCanonicalizer, CANONICALIZATION_METHODS } from "../canonicalization/XMLCanonicalizer";
 import { extractSignerInfo } from "../certificate";
 import { SignatureInfo } from "./types";
 import { formatPEM } from "./certificateUtils";
 import {
+  getChildElements,
   getCompactText,
   getDsigChildren,
+  getUnsignedSignatureProperties,
+  getXadesChildren,
   getSignatureParts,
   getSingleDsigChild,
   isSignedPropertiesReference,
@@ -31,9 +28,8 @@ function parseInclusiveNamespacesPrefixList(
     return undefined;
   }
 
-  const inclusiveNamespacesElement = querySelector(
-    canonicalizationMethodElement,
-    "ec\\:InclusiveNamespaces, InclusiveNamespaces",
+  const inclusiveNamespacesElement = getChildElements(canonicalizationMethodElement).find(
+    (child) => child.localName === "InclusiveNamespaces",
   );
   const prefixList = inclusiveNamespacesElement?.getAttribute("PrefixList")?.trim();
 
@@ -92,23 +88,6 @@ export function parseSignatureFile(xmlContent: Uint8Array, filename: string): Si
 
   if (signatureElements.length === 0) {
     console.warn(`No Signature elements found in ${filename}`);
-
-    // If we have ASiC-XAdES format, try to find signatures differently
-    if (text.includes("XAdESSignatures")) {
-      const rootElement = xmlDoc.documentElement;
-
-      // Try direct DOM traversal
-      if (rootElement) {
-        // Look for Signature elements as direct children
-        const directSignature = querySelector(rootElement, "ds\\:Signature, Signature");
-        if (directSignature) {
-          let signatureInfo = parseSignatureElement(directSignature, xmlDoc);
-          signatureInfo.rawXml = text;
-          return signatureInfo;
-        }
-      }
-    }
-
     return null;
   }
 
@@ -188,24 +167,21 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   let signatureTimestamp: string | undefined;
   let signatureTimestampCanonicalizationMethod: string | undefined;
   let signatureTimestampInclusiveNamespacePrefixList: string[] | undefined;
-  const signatureTimestampElement = querySelector(
-    signatureElement,
-    "xades\\:SignatureTimeStamp, SignatureTimeStamp",
-  );
+  const unsignedSignatureProperties = getUnsignedSignatureProperties(signatureElement);
+  const signatureTimestampElement =
+    getXadesChildren(unsignedSignatureProperties, "SignatureTimeStamp")[0] ?? null;
   if (signatureTimestampElement) {
-    const timestampC14nMethodEl = querySelector(
+    const timestampC14nMethodEl = getSingleDsigChild(
       signatureTimestampElement,
-      "ds\\:CanonicalizationMethod, CanonicalizationMethod",
+      "CanonicalizationMethod",
     );
     signatureTimestampCanonicalizationMethod =
       timestampC14nMethodEl?.getAttribute("Algorithm") || undefined;
     signatureTimestampInclusiveNamespacePrefixList =
       parseInclusiveNamespacesPrefixList(timestampC14nMethodEl);
 
-    const timestampElement = querySelector(
-      signatureTimestampElement,
-      "xades\\:EncapsulatedTimeStamp, EncapsulatedTimeStamp",
-    );
+    const timestampElement =
+      getXadesChildren(signatureTimestampElement, "EncapsulatedTimeStamp")[0] ?? null;
     if (timestampElement && timestampElement.textContent) {
       signatureTimestamp = timestampElement.textContent.replace(/\s+/g, "");
     }
@@ -253,15 +229,9 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   }
 
   // Also look for XAdES CertificateValues (contains full chain excluding signer)
-  const certValues = querySelector(
-    signatureElement,
-    "xades\\:CertificateValues, CertificateValues",
-  );
+  const certValues = getXadesChildren(unsignedSignatureProperties, "CertificateValues")[0];
   if (certValues) {
-    const encapsulatedCerts = querySelectorAll(
-      certValues,
-      "xades\\:EncapsulatedX509Certificate, EncapsulatedX509Certificate",
-    );
+    const encapsulatedCerts = getXadesChildren(certValues, "EncapsulatedX509Certificate");
     for (const encCert of encapsulatedCerts) {
       const chainCert = encCert.textContent?.replace(/\s+/g, "") || "";
       if (chainCert) {
@@ -277,26 +247,23 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   // Extract embedded XAdES LTV revocation material (OCSP responses / CRLs) captured
   // at signing time. This lets "not revoked at signing time" be answered offline.
   let revocationValues: { ocsp: string[]; crl: string[] } | undefined;
-  const revocationValuesEl = querySelector(
-    signatureElement,
-    "xades\\:RevocationValues, RevocationValues",
-  );
+  const revocationValuesEl = getXadesChildren(unsignedSignatureProperties, "RevocationValues")[0];
   if (revocationValuesEl) {
     const ocsp: string[] = [];
     const crl: string[] = [];
-    for (const el of querySelectorAll(
-      revocationValuesEl,
-      "xades\\:EncapsulatedOCSPValue, EncapsulatedOCSPValue",
-    )) {
+    const ocspValues = getXadesChildren(revocationValuesEl, "OCSPValues").flatMap((values) =>
+      getXadesChildren(values, "EncapsulatedOCSPValue"),
+    );
+    const crlValues = getXadesChildren(revocationValuesEl, "CRLValues").flatMap((values) =>
+      getXadesChildren(values, "EncapsulatedCRLValue"),
+    );
+    for (const el of ocspValues) {
       const value = el.textContent?.replace(/\s+/g, "");
       if (value) {
         ocsp.push(value);
       }
     }
-    for (const el of querySelectorAll(
-      revocationValuesEl,
-      "xades\\:EncapsulatedCRLValue, EncapsulatedCRLValue",
-    )) {
+    for (const el of crlValues) {
       const value = el.textContent?.replace(/\s+/g, "");
       if (value) {
         crl.push(value);

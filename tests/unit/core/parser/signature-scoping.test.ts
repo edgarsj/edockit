@@ -24,14 +24,14 @@ function buildSignature(id: string, marker: string): string {
       <xades:SignedProperties Id="${id}-SignedProperties"><xades:SignedSignatureProperties>
         <xades:SigningTime>${marker === "FIRST" ? "2021-01-01T00:00:00Z" : "2022-02-02T00:00:00Z"}</xades:SigningTime>
       </xades:SignedSignatureProperties></xades:SignedProperties>
-      <xades:UnsignedSignatureProperties>
+      <xades:UnsignedProperties><xades:UnsignedSignatureProperties>
         <xades:CertificateValues>
           <xades:EncapsulatedX509Certificate>CERT-${marker}</xades:EncapsulatedX509Certificate>
         </xades:CertificateValues>
         <xades:RevocationValues><xades:OCSPValues>
           <xades:EncapsulatedOCSPValue>OCSP-${marker}</xades:EncapsulatedOCSPValue>
         </xades:OCSPValues></xades:RevocationValues>
-      </xades:UnsignedSignatureProperties>
+      </xades:UnsignedSignatureProperties></xades:UnsignedProperties>
     </xades:QualifyingProperties></ds:Object>
   </ds:Signature>`;
 }

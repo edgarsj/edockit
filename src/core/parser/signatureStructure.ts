@@ -107,6 +107,30 @@ export function locateTopLevelSignatures(doc: Document): Element[] {
   return getDsigChildren(root, "Signature");
 }
 
+/**
+ * Locate xades:UnsignedSignatureProperties of a signature via
+ * ds:Object/xades:QualifyingProperties/xades:UnsignedProperties.
+ */
+export function getUnsignedSignatureProperties(signature: Element): Element | null {
+  for (const object of getDsigChildren(signature, "Object")) {
+    for (const qualifyingProperties of getXadesChildren(object, "QualifyingProperties")) {
+      for (const unsignedProperties of getXadesChildren(
+        qualifyingProperties,
+        "UnsignedProperties",
+      )) {
+        const unsignedSignatureProperties = getXadesChildren(
+          unsignedProperties,
+          "UnsignedSignatureProperties",
+        )[0];
+        if (unsignedSignatureProperties) {
+          return unsignedSignatureProperties;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export interface SignatureParts {
   signature: Element;
   signedInfo: Element;
