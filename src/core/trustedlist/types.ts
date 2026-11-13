@@ -19,6 +19,17 @@ export type TrustListPurposeMask = 1 | 2 | 3;
 export interface TrustedListFetchOptions {
   timeout?: number;
   proxyUrl?: string;
+  /**
+   * Extra attempts for a LOTL/TSL endpoint that fails to fetch (network error,
+   * timeout, non-2xx). Defaults to 1.
+   */
+  retries?: number;
+  /**
+   * Trusted lists are not signature-verified by the builder, so their integrity
+   * relies on TLS. By default `http://` LOTL/TSL locations are upgraded to
+   * `https://`; set this to `true` to fetch them over plain HTTP instead.
+   */
+  allowInsecureHttp?: boolean;
 }
 
 export interface TrustedStatusPeriod {
