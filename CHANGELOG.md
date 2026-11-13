@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Refreshed bundled EU trusted-list snapshot** - Regenerated from the EU LOTL and AdES LOTL on 2026-11-13 (3811 → 3847 services)
+- **Trusted lists fetched over HTTPS by default** - `http://` LOTL/TSL locations (e.g. the Slovak TSL pointer) are upgraded to `https://` because trusted-list XML signatures are not verified by the builder; opt out with `allowInsecureHttp: true`. Failed endpoints are retried once (`retries` option)
+
+### Security
+
+- **Dependency advisories** - `fflate` 0.8.3 (infinite loop on malformed ZIP64 archives in `unzipSync`) and `@xmldom/xmldom` 0.9.12 (well-formedness bypasses and quadratic-time/memory parsing DoS). Dev toolchain moved to `@web/test-runner` 1.x; `npm audit --omit=dev` reports 0 vulnerabilities
+
 ## [0.4.1] - 2026-06-26
 
 ### Added
