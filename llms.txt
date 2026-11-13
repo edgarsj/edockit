@@ -1,0 +1,62 @@
+# edockit
+
+> TypeScript library for parsing and verifying EU ASiC-E signature containers (.asice, .sce) and Latvian eDoc (.edoc) in browsers and Node.js. It checks XAdES signatures, file digests, RFC 3161 timestamps, OCSP/CRL revocation and EU trusted lists, and reports the eIDAS signature level (QES, AdES with a qualified certificate, AdES).
+
+This file holds integration rules for coding agents. The API details are in README.md and TRUSTED-LIST.md (both ship in the npm package), and in the JSDoc of the bundled `.d.ts` files.
+
+## Entry points
+
+- `edockit`: `parseEdoc`, `verifySignature`, `getQcStatements`, timestamp helpers
+- `edockit/trusted-list`: `createTrustListProvider({ url } | { data })`, matching helpers (browser and Node)
+- `edockit/trusted-list/build`: Node only. `generateTrustedListBundle`, `fetchTrustedListBundleWithDiagnostics`, `mergeForwardUnreachableTerritories`
+- `edockit/trusted-list/bundled`: `createBundledTrustListProvider()`, `getBundledTrustedListBundle()`. The snapshot is from the edockit release date; meant for demos, tests and as a build fallback
+- `edockit/trusted-list/http`: `createRemoteTrustListProvider({ url })` for a server-side matching API
+
+## Minimal integration
+
+1. At build or deploy time (Node), generate the trusted-list JSON and host it with your app:
+   `await generateTrustedListBundle({ outputPath: "public/trusted-list.json" })`
+2. At runtime:
+   ```ts
+   import { parseEdoc, verifySignature } from "edockit";
+   import { createTrustListProvider } from "edockit/trusted-list";
+
+   const container = parseEdoc(new Uint8Array(fileBytes));
+   const trustListProvider = createTrustListProvider({ url: "/trusted-list.json" });
+   for (const signature of container.signatures) {
+     const result = await verifySignature(signature, container.files, {
+       trustListProvider,
+       includeChecklist: true,
+       revocationOptions: { proxyUrl: "https://your-cors-proxy/?url=" }, // browsers only
+     });
+     // use result.status, result.statusMessage, result.limitations, result.qualification
+   }
+   ```
+
+## Interpreting results
+
+- Use `result.status`, not only `result.isValid`:
+  - `VALID`: signature, file digests, signer certificate, issuer in the trusted list, revocation and timestamp (if present) all check out
+  - `INVALID`: definitely wrong (changed file, bad signature, revoked certificate, issuer that did not sign the certificate)
+  - `INDETERMINATE`: could not be established. `result.limitations[].code` says why: `TRUST_NOT_CHECKED` (no provider), `ISSUER_NOT_TRUSTED`, `ISSUER_NOT_VERIFIED`, `REVOCATION_UNKNOWN`, `CERT_EXPIRED_NO_POE`, `TIMESTAMP_VERIFICATION_FAILED`, `TIMESTAMP_AUTHORITY_NOT_TRUSTED`
+  - `UNSUPPORTED`: the platform cannot verify it (e.g. RSA keys over 4096 bits in Safari)
+- Never present `INDETERMINATE` as valid. Without a `trustListProvider` the result is never `VALID`.
+- `result.qualification.level` is `QESig`, `QESeal`, `AdESig-QC`, `AdESeal-QC`, `AdESig`, `AdESeal`, `AdES` or `INDETERMINATE`. Show it as a qualified signature only when `result.status === "VALID"`. `qualification.notes` explains a lower level. The level follows what the certificate and the trusted list declare (QcCompliance, QcType, QcSSCD, policies, trusted-list qualifiers).
+- A `trustListMatch.source` other than `"eu"` (e.g. `"ades"`: third-country lists) is never EU qualified.
+- `verifySignature` checks the files a signature references. It does not check that every document in the container is signed. Compare `signature.references` with `container.documentFileList` and warn about unsigned documents.
+- Proof of time comes only from a verified, trusted signature timestamp. Display `signature.signingTime` as the time the signer claimed, not as a verified time.
+
+## Pitfalls
+
+- Browsers: OCSP and CRL endpoints do not send CORS headers. Pass `revocationOptions.proxyUrl` (a proxy you control); otherwise revocation stays unknown (`INDETERMINATE`).
+- Generate the trusted-list bundle with the same edockit version that loads it. Bundles are version 3 since 0.6.0; older versions cannot match their keys, and version 2 bundles carry no qualification data (`qualification.level` is then `INDETERMINATE`).
+- Regenerate the bundle regularly (e.g. on every deploy). Trusted lists change; `createBundledTrustListProvider()` warns when its snapshot is older than 14 days.
+- If the app caches the trusted-list JSON (service worker, CDN, HTTP cache), make sure a new deployment's file replaces the cached one. For example, a precache entry without a revision is never refreshed.
+- National trusted-list servers are sometimes slow or unreachable from build machines. Use `fetchTrustedListBundleWithDiagnostics()` and `mergeForwardUnreachableTerritories()` with the previous bundle (or `getBundledTrustedListBundle()`) to keep unreachable countries instead of dropping them.
+- `parseEdoc` enforces size and entry-count limits (`ParseEdocOptions`) and rejects unsafe entry names; handle its errors as an invalid or unsupported file.
+
+## Docs
+
+- [README.md](https://github.com/edgarsj/edockit/blob/main/README.md): quick start, verification results, signature qualification
+- [TRUSTED-LIST.md](https://github.com/edgarsj/edockit/blob/main/TRUSTED-LIST.md): provider contract, hosting, bundle format, remote and hybrid setups
+- [CHANGELOG.md](https://github.com/edgarsj/edockit/blob/main/CHANGELOG.md): behaviour changes per version

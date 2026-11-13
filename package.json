@@ -110,7 +110,8 @@
     "LICENSE",
     "README.md",
     "TRUSTED-LIST.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "llms.txt"
   ],
   "repository": {
     "type": "git",

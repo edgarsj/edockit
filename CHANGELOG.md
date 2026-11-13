@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **llms.txt** - Integration rules for coding agents (entry points, minimal setup, how to interpret statuses and qualification, common pitfalls); included in the npm package
+
 ## [0.6.0] - 2026-11-13
 
 ### Added
