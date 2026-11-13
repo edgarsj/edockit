@@ -326,7 +326,7 @@ const trustListProvider = createRemoteTrustListProvider({
 - Gzipped, the bundle is about 35% smaller than version 2 even with the qualification data, and loads several times faster (DNs are stored normalized and keys need no decoding).
 - Version 2 bundles remain readable (no qualification data, so `qualification.level` is `INDETERMINATE`). Older edockit versions cannot match keys in version 3 bundles, so generate and load the bundle with the same edockit version.
 
-To keep last-known-good coverage when a national list is temporarily unreachable while building:
+To keep last-known-good coverage when a national list is temporarily unreachable while building (both bundles must be version 3):
 
 ```typescript
 import {

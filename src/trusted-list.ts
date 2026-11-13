@@ -25,11 +25,7 @@ export {
   extractIssuerIdentityFromCertificate,
 } from "./core/trustedlist/identity";
 
-export {
-  buildTrustedListData,
-  createEmptyTrustedListBundle,
-  upgradeTrustedListBundle,
-} from "./core/trustedlist/loader";
+export { buildTrustedListData, createEmptyTrustedListBundle } from "./core/trustedlist/loader";
 
 export {
   matchCertificateIssuerToTrustedList,

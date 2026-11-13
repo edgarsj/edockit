@@ -92,7 +92,11 @@ export type {
   QcPdsLocation,
   CertificateQualificationFacts,
 } from "./core/qcStatements";
-export { determineSignatureQualification, qualificationCriteriaMatch } from "./core/qualification";
+export {
+  determineSignatureQualification,
+  evaluateQualificationCriteria,
+  qualificationCriteriaMatch,
+} from "./core/qualification";
 export type {
   SignatureQualification,
   SignatureQualificationLevel,

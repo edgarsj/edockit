@@ -1,6 +1,7 @@
 import type { CertificateQualificationFacts, QcStatements } from "../../../src/core/qcStatements";
 import {
   determineSignatureQualification,
+  evaluateQualificationCriteria,
   qualificationCriteriaMatch,
 } from "../../../src/core/qualification";
 import type { TrustListMatch } from "../../../src/core/trustedlist/contract";
@@ -105,8 +106,38 @@ describe("qualificationCriteriaMatch", () => {
     ).toBe(false);
   });
 
-  it("does not match criteria it cannot evaluate", () => {
-    expect(qualificationCriteriaMatch({ assert: "none", unsupported: true }, facts())).toBe(false);
+  it("keeps criteria it cannot evaluate unknown, also under negation", () => {
+    expect(evaluateQualificationCriteria({ assert: "none", unsupported: true }, facts())).toBe(
+      undefined,
+    );
+    const negatedUnknown = {
+      assert: "none" as const,
+      criteriaLists: [{ assert: "all" as const, unsupported: true }],
+    };
+    expect(evaluateQualificationCriteria(negatedUnknown, facts())).toBeUndefined();
+    expect(qualificationCriteriaMatch(negatedUnknown, facts())).toBe(false);
+
+    // A known result still decides the list when the unknown part cannot change it
+    expect(
+      evaluateQualificationCriteria(
+        {
+          assert: "atLeastOne",
+          keyUsage: [{ nonRepudiation: true }],
+          criteriaLists: [{ assert: "all", unsupported: true }],
+        },
+        facts(),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateQualificationCriteria(
+        {
+          assert: "all",
+          keyUsage: [{ digitalSignature: true }],
+          criteriaLists: [{ assert: "all", unsupported: true }],
+        },
+        facts(),
+      ),
+    ).toBe(false);
   });
 
   it("does not match key usage criteria when the certificate has no key usage", () => {
@@ -277,6 +308,31 @@ describe("determineSignatureQualification", () => {
 
     expect(result.level).toBe("AdES");
     expect(result.notes.join(" ")).toContain("website authentication");
+  });
+
+  it("is indeterminate when qualifier criteria cannot be evaluated", () => {
+    const result = determineSignatureQualification({
+      facts: facts(),
+      trustListMatch: match([
+        period({
+          qualifications: [
+            {
+              qualifiers: ["QCWithQSCD"],
+              criteria: {
+                assert: "none",
+                criteriaLists: [{ assert: "all", unsupported: true }],
+              },
+            },
+          ],
+        }),
+      ]),
+      signingTime,
+    });
+
+    expect(result.level).toBe("INDETERMINATE");
+    expect(result.notes).toEqual([
+      "The trusted list uses qualification criteria that cannot be evaluated",
+    ]);
   });
 
   it("is indeterminate without qualification data and not qualified for third-country lists", () => {

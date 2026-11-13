@@ -72,16 +72,19 @@ function allOf(values: string[], present: (value: string) => boolean): boolean {
   return values.every(present);
 }
 
-/** Evaluate a trusted-list CriteriaList against a certificate (ETSI TS 119 612, 5.5.9.2) */
-export function qualificationCriteriaMatch(
+/**
+ * Evaluate a trusted-list CriteriaList against a certificate (ETSI TS 119 612,
+ * 5.5.9.2) with three-valued logic: `undefined` means the list contains a
+ * criterion this library cannot evaluate and the outcome depends on it.
+ */
+export function evaluateQualificationCriteria(
   criteria: QualificationCriteriaList,
   facts: CertificateQualificationFacts,
-): boolean {
+): boolean | undefined {
+  const results: Array<boolean | undefined> = [];
   if (criteria.unsupported) {
-    return false;
+    results.push(undefined);
   }
-
-  const results: boolean[] = [];
   for (const bits of criteria.keyUsage ?? []) {
     const keyUsage = facts.keyUsage;
     results.push(
@@ -99,18 +102,36 @@ export function qualificationCriteriaMatch(
     results.push(allOf(attributes, (oid) => facts.subjectAttributeOids.has(oid)));
   }
   for (const nested of criteria.criteriaLists ?? []) {
-    results.push(qualificationCriteriaMatch(nested, facts));
+    results.push(evaluateQualificationCriteria(nested, facts));
   }
+
+  const anyTrue = results.some((result) => result === true);
+  const anyFalse = results.some((result) => result === false);
+  const anyUnknown = results.some((result) => result === undefined);
 
   switch (criteria.assert) {
     case "all":
-      return results.every(Boolean);
+      return anyFalse ? false : anyUnknown ? undefined : true;
     case "none":
-      return !results.some(Boolean);
+      return anyTrue ? false : anyUnknown ? undefined : true;
     default:
-      return results.some(Boolean);
+      return anyTrue ? true : anyUnknown ? undefined : false;
   }
 }
+
+/** Whether a trusted-list CriteriaList definitely matches a certificate */
+export function qualificationCriteriaMatch(
+  criteria: QualificationCriteriaList,
+  facts: CertificateQualificationFacts,
+): boolean {
+  return evaluateQualificationCriteria(criteria, facts) === true;
+}
+
+type QualificationAtTimeResult = CertificateQualificationAtTime & {
+  note?: string;
+  /** Qualifier criteria could not be evaluated, so the result is unknown */
+  undeterminable?: boolean;
+};
 
 function isIssuedBeforeEidas(facts: CertificateQualificationFacts): boolean {
   return facts.notBefore.getTime() < EIDAS_EFFECTIVE_DATE.getTime();
@@ -146,10 +167,20 @@ function evaluatePeriod(
   facts: CertificateQualificationFacts,
   period: TrustedQualificationPeriod,
   time: Date,
-): CertificateQualificationAtTime & { note?: string } {
+): QualificationAtTimeResult {
   const qualifiers = new Set<string>();
   for (const element of period.qualifications) {
-    if (qualificationCriteriaMatch(element.criteria, facts)) {
+    const applies = evaluateQualificationCriteria(element.criteria, facts);
+    if (applies === undefined) {
+      return {
+        time,
+        qualified: false,
+        qscd: false,
+        undeterminable: true,
+        note: "The trusted list uses qualification criteria that cannot be evaluated",
+      };
+    }
+    if (applies) {
       element.qualifiers.forEach((qualifier) => qualifiers.add(qualifier));
     }
   }
@@ -219,7 +250,7 @@ function evaluateAtTime(
   facts: CertificateQualificationFacts,
   periods: TrustedQualificationPeriod[],
   time: Date,
-): CertificateQualificationAtTime & { note?: string } {
+): QualificationAtTimeResult {
   const unix = Math.floor(time.getTime() / 1000);
   const active = periods.filter(
     (period) => unix >= period.fromUnix && (period.toUnix === null || unix < period.toUnix),
@@ -236,7 +267,11 @@ function evaluateAtTime(
   }
 
   const results = active.map((period) => evaluatePeriod(facts, period, time));
-  return results.find((result) => result.qualified && result.type) ?? results[0];
+  return (
+    results.find((result) => result.undeterminable) ??
+    results.find((result) => result.qualified && result.type) ??
+    results[0]
+  );
 }
 
 function nonQualifiedLevel(type: QcType | undefined): SignatureQualificationLevel {
@@ -252,8 +287,9 @@ function buildResult(
 
 function stripNote({
   note: _note,
+  undeterminable: _undeterminable,
   ...rest
-}: CertificateQualificationAtTime & { note?: string }): CertificateQualificationAtTime {
+}: QualificationAtTimeResult): CertificateQualificationAtTime {
   return rest;
 }
 
@@ -299,6 +335,17 @@ export function determineSignatureQualification(input: {
   const atIssuance = evaluateAtTime(facts, periods, facts.notBefore);
   const atSigningTime = evaluateAtTime(facts, periods, signingTime);
   const notes = [...new Set([atIssuance.note, atSigningTime.note].filter(Boolean) as string[])];
+
+  if (atIssuance.undeterminable || atSigningTime.undeterminable) {
+    return buildResult("INDETERMINATE", {
+      qualifiedCertificate: false,
+      ...(claimedType ? { certificateType: claimedType } : {}),
+      qscd: false,
+      atIssuance: stripNote(atIssuance),
+      atSigningTime: stripNote(atSigningTime),
+      notes,
+    });
+  }
   const qualified = atIssuance.qualified && atSigningTime.qualified;
   const type =
     atIssuance.type && atSigningTime.type && atIssuance.type !== atSigningTime.type

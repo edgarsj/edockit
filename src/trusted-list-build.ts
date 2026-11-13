@@ -6,10 +6,7 @@ export {
 } from "./core/trustedlist/index";
 export type { TrustedListFetchDiagnostics, TrustedListFetchResult } from "./core/trustedlist/index";
 
-export {
-  mergeForwardUnreachableTerritories,
-  upgradeTrustedListBundle,
-} from "./core/trustedlist/loader";
+export { mergeForwardUnreachableTerritories } from "./core/trustedlist/loader";
 
 export {
   buildTrustedListManifest,

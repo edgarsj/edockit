@@ -467,37 +467,6 @@ export function buildCompactTrustedListBundle(
 }
 
 /**
- * Convert a compact bundle to version 3. Version 2 SPKI hashes are truncated
- * to lookup keys, SKIs are dropped and DNs are normalized; version 2 bundles
- * carry no qualification data.
- */
-export function upgradeTrustedListBundle(
-  bundle: CompactTrustedListBundle,
-): CompactTrustedListBundle {
-  if (bundle.v === 3) {
-    return bundle;
-  }
-
-  return {
-    ...bundle,
-    v: 3,
-    dns: bundle.dns.map((dn) => normalizeDistinguishedName(dn)),
-    quals: [],
-    services: bundle.services.map((service) =>
-      compactServiceRecord(
-        service[0] ? service[0].slice(0, SPKI_KEY_LENGTH) : null,
-        service[2],
-        service[3],
-        service[4],
-        service[5],
-        service[6],
-        [],
-      ),
-    ),
-  };
-}
-
-/**
  * Carry forward last-known-good services only for territories whose advertised
  * TSL endpoints were explicitly observed as unreachable during this fetch.
  *
@@ -505,16 +474,19 @@ export function upgradeTrustedListBundle(
  * absence can represent a legitimate removal and must not resurrect stale trust.
  * A territory present in the fresh bundle always wins.
  *
- * The result is a version 3 bundle; a version 2 `previous` bundle is upgraded
- * first (its carried services then have no qualification data).
+ * Both bundles must be version 3 (as built by `buildCompactTrustedListBundle`);
+ * version 2 bundles lack the qualification data a version 3 bundle promises.
  */
 export function mergeForwardUnreachableTerritories(
-  freshBundle: CompactTrustedListBundle,
-  previousBundle: CompactTrustedListBundle,
+  fresh: CompactTrustedListBundle,
+  previous: CompactTrustedListBundle,
   unreachableTerritories: ReadonlySet<string>,
 ): CompactTrustedListBundle {
-  const fresh = upgradeTrustedListBundle(freshBundle);
-  const previous = upgradeTrustedListBundle(previousBundle);
+  if (fresh.v !== 3 || previous.v !== 3) {
+    throw new Error(
+      `mergeForwardUnreachableTerritories requires version 3 bundles (received ${fresh.v} and ${previous.v})`,
+    );
+  }
   const freshTerritories = new Set(fresh.services.map((service) => service[3]));
   const carriedServices = previous.services.filter(
     (service) => unreachableTerritories.has(service[3]) && !freshTerritories.has(service[3]),

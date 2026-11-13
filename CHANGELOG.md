@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Signature qualification** - `verifySignature()` reports `qualification` (`QESig`, `QESeal`, `AdESig-QC`, `AdESeal-QC`, `AdESig`, `AdESeal`, `AdES`, `INDETERMINATE`) with the certificate type (`esign` / `eseal` / `web`) and QSCD status, determined from the certificate's QC statements and the issuing service's trusted-list data (granted `CA/QC` status at issuance and signing time, `ForeSignatures` / `ForeSeals` / `ForWebSiteAuthentication`, qualifiers such as `QCWithQSCD` or `NotQualified`)
 - **QC statements** - `getQcStatements()` / `parseQcStatementsValue()` parse the qcStatements certificate extension (QcCompliance, QcType, QcSSCD, QcPDS, QcRetentionPeriod, QcCClegislation, semantics identifier); `getCertificateQualificationFacts()` adds policies, key usage, extended key usage and subject attributes
 - **Trusted-list qualification data** - Trusted-list parsing keeps AdditionalServiceInformation and Qualifications extensions per history period; exact signature-issuer matches carry `qualificationPeriods`
-- **Build helpers** - `edockit/trusted-list/build` exports `fetchTrustedListBundleWithDiagnostics`, `mergeForwardUnreachableTerritories` and `upgradeTrustedListBundle`; `edockit/trusted-list/bundled` exports `getBundledTrustedListBundle()`
+- **Build helpers** - `edockit/trusted-list/build` exports `fetchTrustedListBundleWithDiagnostics` and `mergeForwardUnreachableTerritories` (version 3 bundles only); `edockit/trusted-list/bundled` exports `getBundledTrustedListBundle()`
 
 ### Changed
 
