@@ -67,6 +67,14 @@ function getInclusiveNamespacePrefixes(transform: Element): string[] | undefined
   return undefined;
 }
 
+/** Comment-free algorithm for each #WithComments canonicalization variant */
+const COMMENT_FREE_VARIANT: Record<string, string> = {
+  "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments":
+    "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+  "http://www.w3.org/2006/12/xml-c14n11#WithComments": "http://www.w3.org/2006/12/xml-c14n11",
+  "http://www.w3.org/2001/10/xml-exc-c14n#WithComments": "http://www.w3.org/2001/10/xml-exc-c14n#",
+};
+
 /**
  * Canonicalize a same-document reference target according to the reference's
  * transforms. Only canonicalization transforms are supported, which covers
@@ -92,7 +100,7 @@ function canonicalizeReferenceTarget(reference: Element, target: Element): strin
 
   // A bare-name reference (#id) dereferences to a node-set without comments,
   // so comments are omitted even for the #WithComments variants
-  return XMLCanonicalizer.canonicalize(target, algorithm.replace(/#WithComments$/, ""), {
+  return XMLCanonicalizer.canonicalize(target, COMMENT_FREE_VARIANT[algorithm] ?? algorithm, {
     inclusiveNamespacePrefixList: getInclusiveNamespacePrefixes(transforms[0]),
   });
 }

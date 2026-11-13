@@ -831,12 +831,19 @@ class XMLCanonicalizer {
 
   // Method that takes URI directly
   static canonicalize(node: Node, methodUri: string, options: any = {}): string {
-    // Get the method from the URI
-    const methodKey =
-      CANONICALIZATION_METHODS[methodUri as keyof typeof CANONICALIZATION_METHODS] ||
-      CANONICALIZATION_METHODS.default;
+    // Get the method from the URI. An absent method or the "default"/"c14n"
+    // sentinels mean Canonical XML 1.0; unknown URIs are rejected rather than
+    // silently canonicalized with a different algorithm.
+    const isDefault =
+      !methodUri || methodUri === "default" || methodUri === CANONICALIZATION_METHODS.default;
+    const methodKey = isDefault
+      ? CANONICALIZATION_METHODS.default
+      : CANONICALIZATION_METHODS[methodUri as keyof typeof CANONICALIZATION_METHODS];
+    if (!methodKey) {
+      throw new Error(`Unsupported canonicalization method: ${methodUri}`);
+    }
 
-    const withComments = methodUri.endsWith("#WithComments");
+    const withComments = !isDefault && methodUri.endsWith("#WithComments");
 
     switch (methodKey) {
       case "c14n":
