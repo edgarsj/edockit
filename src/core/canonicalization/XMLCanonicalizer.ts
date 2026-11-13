@@ -73,6 +73,7 @@ const NODE_TYPES = {
   TEXT_NODE: 3,
   CDATA_SECTION_NODE: 4,
   PROCESSING_INSTRUCTION_NODE: 7,
+  COMMENT_NODE: 8,
 };
 
 // Options for exclusive canonicalization
@@ -99,11 +100,63 @@ interface NodeWithWhitespace extends Node {
   _originalText?: string; // To store original text content
 }
 
+const XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace";
+
 class XMLCanonicalizer {
   private method: CanonMethod;
+  /** Render comment nodes (the #WithComments variants) */
+  private withComments: boolean;
 
-  constructor(method: CanonMethod = methods.c14n) {
+  constructor(method: CanonMethod = methods.c14n, withComments = false) {
     this.method = method;
+    this.withComments = withComments;
+  }
+
+  /**
+   * xml:* attributes inherited from ancestors that are not set on `element`
+   * (nearest ancestor wins).
+   */
+  private collectInheritedXmlAttributes(element: Element): Attr[] {
+    const isC14n11 = this.method.isCanonicalizationMethod === "c14n11";
+    const own = new Set<string>();
+    for (let i = 0; i < element.attributes.length; i++) {
+      const attr = element.attributes[i];
+      if (attr.name.startsWith("xml:")) {
+        own.add(attr.name);
+      }
+    }
+
+    const inherited = new Map<string, Attr>();
+    let current = element.parentNode;
+    while (current && current.nodeType === NODE_TYPES.ELEMENT_NODE) {
+      const ancestor = current as Element;
+      for (let i = 0; i < ancestor.attributes.length; i++) {
+        const attr = ancestor.attributes[i];
+        if (!attr.name.startsWith("xml:") || own.has(attr.name) || inherited.has(attr.name)) {
+          continue;
+        }
+        if (isC14n11 && attr.name !== "xml:lang" && attr.name !== "xml:space") {
+          continue;
+        }
+        inherited.set(attr.name, attr);
+      }
+      current = current.parentNode;
+    }
+
+    return Array.from(inherited.values()).map(
+      (attr) =>
+        ({
+          name: attr.name,
+          value: attr.value,
+          localName: attr.name.substring(4),
+          namespaceURI: XML_NAMESPACE,
+        }) as unknown as Attr,
+    );
+  }
+
+  /** Canonical form of a comment node, or "" when comments are omitted. */
+  private renderComment(node: Node): string {
+    return this.withComments ? `<!--${node.nodeValue || ""}-->` : "";
   }
 
   // Static method to get canonicalizer by URI
@@ -112,7 +165,7 @@ class XMLCanonicalizer {
     if (!methodKey) {
       throw new Error(`Unsupported canonicalization method: ${methodUri}`);
     }
-    return new XMLCanonicalizer(methods[methodKey]);
+    return new XMLCanonicalizer(methods[methodKey], methodUri.endsWith("#WithComments"));
   }
 
   static base64Elements = new Set([
@@ -376,26 +429,41 @@ class XMLCanonicalizer {
     let result = "";
 
     if (node.nodeType === NODE_TYPES.ELEMENT_NODE) {
-      // Create a new map for this element's visible namespaces
-      const elementVisibleNamespaces = new Map(visibleNamespaces);
       const element = node as Element & NodeWithWhitespace;
 
-      // Collect namespaces declared on this element
-      // Handle default namespace
-      const xmlnsAttr = element.getAttribute("xmlns");
-      if (xmlnsAttr !== null) {
-        elementVisibleNamespaces.set("", xmlnsAttr);
+      // Namespace context passed down to children: everything in scope here.
+      // For the starting node that includes namespaces inherited from
+      // ancestors, which are rendered on it (inclusive canonicalization).
+      let elementVisibleNamespaces: Map<string, string>;
+      let namespacesToRender: Array<[string, string]>;
+
+      if (options.isStartingNode) {
+        elementVisibleNamespaces = XMLCanonicalizer.collectNamespaces(node);
+        namespacesToRender = Array.from(elementVisibleNamespaces.entries()).filter(
+          ([nsPrefix, uri]) => !(nsPrefix === "" && uri === ""),
+        );
+      } else {
+        elementVisibleNamespaces = new Map(visibleNamespaces);
+        const xmlnsAttr = element.getAttribute("xmlns");
+        if (xmlnsAttr !== null) {
+          elementVisibleNamespaces.set("", xmlnsAttr);
+        }
+        const nsAttrs = element.attributes;
+        for (let i = 0; i < nsAttrs.length; i++) {
+          const attr = nsAttrs[i];
+          if (attr.name.startsWith("xmlns:")) {
+            elementVisibleNamespaces.set(attr.name.substring(6), attr.value);
+          }
+        }
+        // Only declarations that change the namespace context are rendered
+        namespacesToRender = Array.from(elementVisibleNamespaces.entries()).filter(
+          ([nsPrefix, uri]) =>
+            (visibleNamespaces.get(nsPrefix) ?? "") !== uri ||
+            (nsPrefix !== "" && !visibleNamespaces.has(nsPrefix)),
+        );
       }
 
-      // Handle prefixed namespaces
-      const nsAttrs = element.attributes;
-      for (let i = 0; i < nsAttrs.length; i++) {
-        const attr = nsAttrs[i];
-        if (attr.name.startsWith("xmlns:")) {
-          const prefix = attr.name.substring(6);
-          elementVisibleNamespaces.set(prefix, attr.value);
-        }
-      }
+      namespacesToRender.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
       // Prepare the element's start tag
       const prefix = element.prefix || "";
@@ -404,58 +472,29 @@ class XMLCanonicalizer {
 
       result += "<" + qName;
 
-      // Handle namespaces based on whether it's the starting node
-      if (options.isStartingNode) {
-        // Collect all namespaces in scope for this element
-        const allNamespaces = XMLCanonicalizer.collectNamespaces(node);
-
-        // Include all namespaces that are in scope, sorted appropriately
-        const nsEntries = Array.from(allNamespaces.entries()).sort((a, b) => {
-          if (a[0] === "") return -1;
-          if (b[0] === "") return 1;
-          return a[0].localeCompare(b[0]);
-        });
-
-        for (const [prefix, uri] of nsEntries) {
-          if (prefix === "") {
-            result += ` xmlns="${uri}"`;
-          } else {
-            result += ` xmlns:${prefix}="${uri}"`;
-          }
-        }
-      } else {
-        // For non-starting nodes, only include newly declared namespaces
-        const nsEntries = Array.from(elementVisibleNamespaces.entries())
-          .filter(([p, uri]) => {
-            // Include if:
-            // 1. It's not in the parent's visible namespaces, or
-            // 2. The URI is different from parent's
-            return !visibleNamespaces.has(p) || visibleNamespaces.get(p) !== uri;
-          })
-          .sort((a, b) => {
-            if (a[0] === "") return -1;
-            if (b[0] === "") return 1;
-            return a[0].localeCompare(b[0]);
-          });
-
-        for (const [prefix, uri] of nsEntries) {
-          if (prefix === "") {
-            result += ` xmlns="${uri}"`;
-          } else {
-            result += ` xmlns:${prefix}="${uri}"`;
-          }
+      for (const [nsPrefix, uri] of namespacesToRender) {
+        if (nsPrefix === "") {
+          result += ` xmlns="${XMLCanonicalizer.escapeAttribute(uri)}"`;
+        } else {
+          result += ` xmlns:${nsPrefix}="${XMLCanonicalizer.escapeAttribute(uri)}"`;
         }
       }
 
       // Handle attributes (sorted lexicographically)
       const elementAttrs = element.attributes;
-      const attrArray = [];
+      const attrArray: Attr[] = [];
 
       for (let i = 0; i < elementAttrs.length; i++) {
         const attr = elementAttrs[i];
         if (!attr.name.startsWith("xmlns")) {
           attrArray.push(attr);
         }
+      }
+
+      // Inclusive canonicalization of a subtree carries over xml:* attributes
+      // in scope from ancestors (C14N 1.1: only xml:lang and xml:space)
+      if (options.isStartingNode) {
+        attrArray.push(...this.collectInheritedXmlAttributes(element));
       }
 
       attrArray.sort(XMLCanonicalizer.compareAttributes);
@@ -511,9 +550,16 @@ class XMLCanonicalizer {
           continue;
         }
 
-        // Processing instructions are retained (comments are omitted)
+        // Processing instructions are retained
         if (child.nodeType === NODE_TYPES.PROCESSING_INSTRUCTION_NODE) {
           result += renderProcessingInstruction(child);
+          lastWasElement = false;
+          continue;
+        }
+
+        // Comments only in the #WithComments variants
+        if (child.nodeType === NODE_TYPES.COMMENT_NODE) {
+          result += this.renderComment(child);
           lastWasElement = false;
           continue;
         }
@@ -667,8 +713,11 @@ class XMLCanonicalizer {
           // Character data is escaped per Canonical XML (&, <, >, CR)
           result += XMLCanonicalizer.escapeText(text);
         } else if (child.nodeType === NODE_TYPES.PROCESSING_INSTRUCTION_NODE) {
-          // Processing instructions are retained (comments are omitted)
+          // Processing instructions are retained
           result += renderProcessingInstruction(child);
+        } else if (child.nodeType === NODE_TYPES.COMMENT_NODE) {
+          // Comments only in the #WithComments variants
+          result += this.renderComment(child);
         } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
           // Recursively process child elements
           // For child elements, we pass the namespaces from the parent but mark as non-root
@@ -695,30 +744,34 @@ class XMLCanonicalizer {
   }
 
   // Static methods for canonicalization
-  static c14n(node: Node): string {
+  static c14n(node: Node, withComments = false): string {
     // First analyze document whitespace
     this.analyzeWhitespace(node);
 
     // Then create canonicalizer and process the node
-    const canonicalizer = new XMLCanonicalizer(methods.c14n);
+    const canonicalizer = new XMLCanonicalizer(methods.c14n, withComments);
     return canonicalizer.canonicalize(node as NodeWithWhitespace);
   }
 
-  static c14n11(node: Node): string {
+  static c14n11(node: Node, withComments = false): string {
     // First analyze document whitespace
     this.analyzeWhitespace(node);
 
     // Then create canonicalizer and process the node
-    const canonicalizer = new XMLCanonicalizer(methods.c14n11);
+    const canonicalizer = new XMLCanonicalizer(methods.c14n11, withComments);
     return canonicalizer.canonicalize(node as NodeWithWhitespace);
   }
 
-  static c14n_exc(node: Node, inclusiveNamespacePrefixList: string[] = []): string {
+  static c14n_exc(
+    node: Node,
+    inclusiveNamespacePrefixList: string[] = [],
+    withComments = false,
+  ): string {
     // First analyze document whitespace
     this.analyzeWhitespace(node);
 
     // Create canonicalizer and process the node with exclusive canonicalization
-    const canonicalizer = new XMLCanonicalizer(methods.c14n_exc);
+    const canonicalizer = new XMLCanonicalizer(methods.c14n_exc, withComments);
     return canonicalizer.canonicalizeExclusive(node as NodeWithWhitespace, new Map(), {
       inclusiveNamespacePrefixList,
     });
@@ -731,13 +784,15 @@ class XMLCanonicalizer {
       CANONICALIZATION_METHODS[methodUri as keyof typeof CANONICALIZATION_METHODS] ||
       CANONICALIZATION_METHODS.default;
 
+    const withComments = methodUri.endsWith("#WithComments");
+
     switch (methodKey) {
       case "c14n":
-        return this.c14n(node);
+        return this.c14n(node, withComments);
       case "c14n11":
-        return this.c14n11(node);
+        return this.c14n11(node, withComments);
       case "c14n_exc":
-        return this.c14n_exc(node, options.inclusiveNamespacePrefixList || []);
+        return this.c14n_exc(node, options.inclusiveNamespacePrefixList || [], withComments);
       default:
         throw new Error(`Unsupported canonicalization method: ${methodUri}`);
     }

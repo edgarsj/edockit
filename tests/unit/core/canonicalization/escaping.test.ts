@@ -54,4 +54,49 @@ describe("Canonical XML escaping", () => {
     expect(canonical).toContain("<?bare?>");
     expect(canonical).not.toContain("note");
   });
+
+  it.each([
+    "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+    "http://www.w3.org/2006/12/xml-c14n11",
+  ])("does not repeat inherited namespace declarations on descendants (%s)", (method) => {
+    const doc = createXMLParser().parseFromString(
+      `<root xmlns:x="urn:x" xmlns="urn:d"><sp Id="a"><x:c xmlns:x="urn:x">t</x:c><e xmlns=""/></sp></root>`,
+      "application/xml",
+    );
+    const sp = doc.documentElement.getElementsByTagName("sp")[0];
+
+    expect(XMLCanonicalizer.canonicalize(sp, method)).toBe(
+      `<sp xmlns="urn:d" xmlns:x="urn:x" Id="a"><x:c>t</x:c><e xmlns=""></e></sp>`,
+    );
+  });
+
+  it.each(METHODS)("renders comments only for the #WithComments variant (%s)", (method) => {
+    const doc = createXMLParser().parseFromString(`<r><!-- note --><a/></r>`, "application/xml");
+
+    expect(XMLCanonicalizer.canonicalize(doc.documentElement, method)).toBe("<r><a></a></r>");
+    expect(
+      XMLCanonicalizer.canonicalize(
+        doc.documentElement,
+        `${method}#WithComments`.replace("##", "#"),
+      ),
+    ).toBe("<r><!-- note --><a></a></r>");
+  });
+
+  it("carries inherited xml:* attributes onto a canonicalized subtree", () => {
+    const doc = createXMLParser().parseFromString(
+      `<root xml:lang="lv" xml:space="preserve" xml:base="http://x/"><sp Id="a"><c>t</c></sp></root>`,
+      "application/xml",
+    );
+    const sp = doc.documentElement.getElementsByTagName("sp")[0];
+
+    expect(
+      XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"),
+    ).toBe(`<sp Id="a" xml:base="http://x/" xml:lang="lv" xml:space="preserve"><c>t</c></sp>`);
+    expect(XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/2006/12/xml-c14n11")).toBe(
+      `<sp Id="a" xml:lang="lv" xml:space="preserve"><c>t</c></sp>`,
+    );
+    expect(XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/2001/10/xml-exc-c14n#")).toBe(
+      `<sp Id="a"><c>t</c></sp>`,
+    );
+  });
 });
