@@ -51,7 +51,72 @@ export interface TrustedListFetchResult {
   diagnostics: TrustedListFetchDiagnostics;
 }
 
+const MAX_TRUSTED_LIST_REDIRECTS = 5;
+
+/**
+ * Fetch a LOTL/TSL document directly, following redirects manually so the
+ * HTTPS-only rule (see resolveTrustedListFetchUrl) applies to every hop, not
+ * just the initial URL.
+ */
+async function fetchXmlDirect(url: string, options: TrustedListFetchOptions): Promise<ArrayBuffer> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeout ?? 10000);
+
+  try {
+    let currentUrl = url;
+    for (let hop = 0; hop <= MAX_TRUSTED_LIST_REDIRECTS; hop++) {
+      const response = await fetch(currentUrl, {
+        headers: { Accept: "application/xml, text/xml;q=0.9, */*;q=0.8" },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("Location");
+        if (!location) {
+          throw new Error(`HTTP ${response.status} redirect without a Location header`);
+        }
+        if (hop === MAX_TRUSTED_LIST_REDIRECTS) {
+          throw new Error("Too many redirects");
+        }
+        const nextUrl = new URL(location, currentUrl).toString();
+        if (!/^https?:\/\//i.test(nextUrl)) {
+          throw new Error(`Redirect to unsupported URL "${nextUrl}"`);
+        }
+        currentUrl = resolveTrustedListFetchUrl(nextUrl, options);
+        continue;
+      }
+
+      if (response.type === "opaqueredirect") {
+        throw new Error("Redirects cannot be inspected in this environment");
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.arrayBuffer();
+    }
+    throw new Error("Too many redirects");
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timeout after ${options.timeout ?? 10000}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchXml(url: string, options: TrustedListFetchOptions = {}): Promise<string> {
+  if (!options.proxyUrl) {
+    try {
+      return new TextDecoder().decode(await fetchXmlDirect(url, options));
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch "${url}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   const result = await fetchBinary(url, {
     timeout: options.timeout ?? 10000,
     accept: "application/xml, text/xml;q=0.9, */*;q=0.8",
@@ -65,21 +130,45 @@ async function fetchXml(url: string, options: TrustedListFetchOptions = {}): Pro
   return new TextDecoder().decode(result.data);
 }
 
+/**
+ * Upgrade `http://` trusted-list locations to `https://` unless the caller
+ * explicitly allows plain HTTP. Trusted lists are not signature-verified here,
+ * so a plain-HTTP fetch would let a network attacker inject trust anchors.
+ */
+export function resolveTrustedListFetchUrl(
+  url: string,
+  options: Pick<TrustedListFetchOptions, "allowInsecureHttp"> = {},
+): string {
+  if (options.allowInsecureHttp || !/^http:\/\//i.test(url)) {
+    return url;
+  }
+  return `https://${url.slice("http://".length)}`;
+}
+
 async function fetchXmlWithWarnings(
   url: string,
   options: TrustedListFetchOptions = {},
 ): Promise<string | null> {
-  try {
-    return await fetchXml(url, options);
-  } catch (error) {
-    // The Node-only builder intentionally skips broken endpoints, including
-    // TLS-chain failures such as UNABLE_TO_VERIFY_LEAF_SIGNATURE, rather than
-    // attempting local intermediate repair in the generic fetch path.
-    console.warn(
-      `Trusted-list fetch warning for "${url}": ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return null;
+  const fetchUrl = resolveTrustedListFetchUrl(url, options);
+  const attempts = 1 + Math.max(0, Math.floor(options.retries ?? 1));
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchXml(fetchUrl, options);
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  // The Node-only builder intentionally skips broken endpoints, including
+  // TLS-chain failures such as UNABLE_TO_VERIFY_LEAF_SIGNATURE, rather than
+  // attempting local intermediate repair in the generic fetch path.
+  const upgradeNote = fetchUrl !== url ? ` (upgraded from "${url}")` : "";
+  console.warn(
+    `Trusted-list fetch warning for "${fetchUrl}"${upgradeNote}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+  return null;
 }
 
 function isProbablyXmlDocument(xml: string): boolean {

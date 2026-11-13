@@ -1,6 +1,7 @@
 import { X509CertificateGenerator } from "@peculiar/x509";
 import {
   fetchTrustedListBundleWithDiagnostics,
+  resolveTrustedListFetchUrl,
   type TrustedListSource,
 } from "../../../../src/core/trustedlist";
 
@@ -135,5 +136,67 @@ describe("trusted-list fetch diagnostics", () => {
 
     expect(result.bundle.services.some((service) => service[3] === "LV")).toBe(true);
     expect(result.diagnostics.unreachableTerritories).toEqual(["EE", "FI", "PL"]);
+  });
+});
+
+describe("resolveTrustedListFetchUrl", () => {
+  it("upgrades plain-HTTP trusted-list locations to HTTPS by default", () => {
+    expect(resolveTrustedListFetchUrl("http://tl.nbu.gov.sk/kca/tsl/tsl.xml")).toBe(
+      "https://tl.nbu.gov.sk/kca/tsl/tsl.xml",
+    );
+    expect(resolveTrustedListFetchUrl("HTTP://example.test/tl.xml")).toBe(
+      "https://example.test/tl.xml",
+    );
+  });
+
+  it("leaves HTTPS untouched and honours allowInsecureHttp", () => {
+    expect(resolveTrustedListFetchUrl("https://example.test/tl.xml")).toBe(
+      "https://example.test/tl.xml",
+    );
+    expect(
+      resolveTrustedListFetchUrl("http://example.test/tl.xml", { allowInsecureHttp: true }),
+    ).toBe("http://example.test/tl.xml");
+  });
+});
+
+describe("trusted-list redirects", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  async function fetchWithRedirect(allowInsecureHttp?: boolean): Promise<string[]> {
+    const requested: string[] = [];
+    globalThis.fetch = jest.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === SOURCE.lotlUrl) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "http://mirror.example.test/lotl.xml" },
+        });
+      }
+      return new Response("<TrustServiceStatusList/>", { status: 200 });
+    }) as typeof fetch;
+
+    await fetchTrustedListBundleWithDiagnostics([SOURCE], { allowInsecureHttp }).catch(
+      () => undefined,
+    );
+    return requested;
+  }
+
+  it("applies the HTTPS-only rule to redirect targets", async () => {
+    expect(await fetchWithRedirect()).toEqual([
+      SOURCE.lotlUrl,
+      "https://mirror.example.test/lotl.xml",
+    ]);
+  });
+
+  it("follows plain-HTTP redirect targets only when allowed", async () => {
+    expect(await fetchWithRedirect(true)).toEqual([
+      SOURCE.lotlUrl,
+      "http://mirror.example.test/lotl.xml",
+    ]);
   });
 });
