@@ -187,7 +187,14 @@ export function resolveSameDocumentReference(doc: Document, uri: string): Elemen
   if (!uri.startsWith("#") || uri.length < 2) {
     throw new Error(`Not a same-document reference: "${uri}"`);
   }
-  const id = uri.slice(1);
+  // The fragment is a URI component: percent-encoded characters are decoded
+  // before matching the Id attribute
+  let id = uri.slice(1);
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    throw new Error(`Reference "${uri}" has an invalid fragment encoding`);
+  }
   const matches = findElementsById(doc, id);
   if (matches.length === 0) {
     throw new Error(`Reference target "${uri}" not found`);
