@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-13
+
 ### Added
 
 - **Signature qualification** - `verifySignature()` reports `qualification` (`QESig`, `QESeal`, `AdESig-QC`, `AdESeal-QC`, `AdESig`, `AdESeal`, `AdES`, `INDETERMINATE`) with the certificate type (`esign` / `eseal` / `web`) and QSCD status, determined from the certificate's QC statements and the issuing service's trusted-list data (granted `CA/QC` status at issuance and signing time, `ForeSignatures` / `ForeSeals` / `ForWebSiteAuthentication`, qualifiers such as `QCWithQSCD` or `NotQualified`)
@@ -181,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File checksum verification (SHA-256/384/512)
 - Browser and Node.js support
 
-[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/edgarsj/edockit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/edgarsj/edockit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/edgarsj/edockit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/edgarsj/edockit/compare/v0.3.0...v0.4.0
