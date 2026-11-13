@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Signature qualification** - `verifySignature()` reports `qualification` (`QESig`, `QESeal`, `AdESig-QC`, `AdESeal-QC`, `AdESig`, `AdESeal`, `AdES`, `INDETERMINATE`) with the certificate type (`esign` / `eseal` / `web`) and QSCD status, determined from the certificate's QC statements and the issuing service's trusted-list data (granted `CA/QC` status at issuance and signing time, `ForeSignatures` / `ForeSeals` / `ForWebSiteAuthentication`, qualifiers such as `QCWithQSCD` or `NotQualified`)
+- **QC statements** - `getQcStatements()` / `parseQcStatementsValue()` parse the qcStatements certificate extension (QcCompliance, QcType, QcSSCD, QcPDS, QcRetentionPeriod, QcCClegislation, semantics identifier); `getCertificateQualificationFacts()` adds policies, key usage, extended key usage and subject attributes
+- **Trusted-list qualification data** - Trusted-list parsing keeps AdditionalServiceInformation and Qualifications extensions per history period; exact signature-issuer matches carry `qualificationPeriods`
+- **Build helpers** - `edockit/trusted-list/build` exports `fetchTrustedListBundleWithDiagnostics`, `mergeForwardUnreachableTerritories` and `upgradeTrustedListBundle`; `edockit/trusted-list/bundled` exports `getBundledTrustedListBundle()`
+
+### Changed
+
+- **Trusted-list bundle version 3** - SPKI hashes are stored as 144-bit lookup keys, SKIs are dropped, DNs are stored normalized and qualification data is added as a codebook. The gzipped bundle is about 35% smaller and loads several times faster. Version 2 bundles remain readable; older edockit versions cannot match version 3 bundles. `TrustedListEntry.spkiSha256Hex` is replaced by `spkiKey` and `TrustedListIndexes.bySpkiSha256` by `bySpkiKey`; SKI + DN matches (`ski_dn`) are only possible with version 2 bundles
+- **Bundled snapshot** - Embedded as a `JSON.parse` string (faster to load than an object literal) and left out of source maps
+
+### Fixed
+
+- **Pre-2016 trusted-list statuses** - The Directive 1999/93/EC statuses `undersupervision` and `supervisionincessation` are treated as trusted, so services in the history of national lists before 1 July 2016 match signatures from that period
+- **Build options** - `generateTrustedListBundle` passes `retries` and `allowInsecureHttp` to the fetcher
+
 ## [0.5.0] - 2026-11-13
 
 ### Added

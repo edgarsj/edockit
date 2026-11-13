@@ -36,7 +36,8 @@ describe("mergeForwardUnreachableTerritories", () => {
   it("preserves the carried-forward service's subject DN via remapped index", () => {
     const merged = mergeForwardUnreachableTerritories(fresh, previous, new Set(["EE"]));
     const eeService = merged.services.find((s) => s[3] === "EE")!;
-    expect(merged.dns[eeService[2]]).toBe("CN=Old EE,C=EE");
+    // Version 2 DNs are normalized when the bundle is upgraded to version 3
+    expect(merged.dns[eeService[2]]).toBe("C=EE,CN=Old EE");
   });
 
   it("does not carry forward territories already present in the fresh bundle (fresh wins)", () => {

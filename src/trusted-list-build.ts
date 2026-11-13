@@ -1,8 +1,15 @@
 export {
   DEFAULT_TRUSTED_LIST_SOURCES,
   fetchTrustedListBundle,
+  fetchTrustedListBundleWithDiagnostics,
   updateTrustedList,
 } from "./core/trustedlist/index";
+export type { TrustedListFetchDiagnostics, TrustedListFetchResult } from "./core/trustedlist/index";
+
+export {
+  mergeForwardUnreachableTerritories,
+  upgradeTrustedListBundle,
+} from "./core/trustedlist/loader";
 
 export {
   buildTrustedListManifest,

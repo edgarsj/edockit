@@ -79,3 +79,22 @@ export type {
   TrustListQuery,
   TrustListQueryPurpose,
 } from "./core/trustedlist/contract";
+
+// Qualified certificates and signature qualification (eIDAS)
+export {
+  getQcStatements,
+  parseQcStatementsValue,
+  getCertificateQualificationFacts,
+} from "./core/qcStatements";
+export type {
+  QcStatements,
+  QcType,
+  QcPdsLocation,
+  CertificateQualificationFacts,
+} from "./core/qcStatements";
+export { determineSignatureQualification, qualificationCriteriaMatch } from "./core/qualification";
+export type {
+  SignatureQualification,
+  SignatureQualificationLevel,
+  CertificateQualificationAtTime,
+} from "./core/qualification";
