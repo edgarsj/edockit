@@ -208,4 +208,151 @@ describe("revocation/fetch", () => {
       );
     });
   });
+
+  describe("URL scheme limits", () => {
+    it.each(["file:///etc/passwd", "ftp://example.com/ca.crl", "ldap://example.com/ca", "nope"])(
+      "does not fetch %s",
+      async (url) => {
+        const result = await fetchBinary(url);
+
+        expect(result.ok).toBe(false);
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it("accepts upper-case http schemes", async () => {
+      mockFetch.mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 }));
+
+      const result = await fetchBinary("HTTP://example.com/file.crl");
+
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("response size limits", () => {
+    it("rejects a response whose Content-Length exceeds the limit", async () => {
+      mockFetch.mockResolvedValue(
+        new Response(new Uint8Array(10), {
+          status: 200,
+          headers: { "Content-Length": String(5 * 1024 * 1024) },
+        }),
+      );
+
+      const result = await fetchBinary("http://example.com/file.crl", { maxBytes: 1024 });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/maximum size/);
+    });
+
+    it("rejects a streamed body that exceeds the limit", async () => {
+      const chunk = new Uint8Array(600);
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(chunk);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+      mockFetch.mockResolvedValue(new Response(stream, { status: 200 }));
+
+      const result = await fetchBinary("http://example.com/file.crl", { maxBytes: 1000 });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/maximum size/);
+    });
+
+    it("returns bodies within the limit", async () => {
+      mockFetch.mockResolvedValue(new Response(new Uint8Array(1000), { status: 200 }));
+
+      const result = await fetchBinary("http://example.com/file.crl", { maxBytes: 1000 });
+
+      expect(result.ok).toBe(true);
+      expect(result.data?.byteLength).toBe(1000);
+    });
+
+    it("applies a 1 MB default limit to OCSP responses", async () => {
+      mockFetch.mockResolvedValue(new Response(new Uint8Array(1024 * 1024 + 1), { status: 200 }));
+
+      const result = await fetchOCSP("http://ocsp.example.com", new ArrayBuffer(10));
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/maximum size/);
+    });
+
+    it("allows CRLs larger than 1 MB by default", async () => {
+      mockFetch.mockResolvedValue(new Response(new Uint8Array(2 * 1024 * 1024), { status: 200 }));
+
+      const result = await fetchCRL("http://crl.example.com/ca.crl");
+
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("timeouts", () => {
+    it("keeps the timeout active while the body is read", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => new Promise<ArrayBuffer>(() => undefined),
+      });
+
+      const result = await fetchBinary("http://example.com/file.crl", { timeout: 50 });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/timeout/i);
+    });
+  });
+
+  describe("redirects", () => {
+    const redirect = (location: string, status = 302) =>
+      new Response(null, { status, headers: { Location: location } });
+
+    it("follows a redirect to another http(s) URL", async () => {
+      mockFetch
+        .mockResolvedValueOnce(redirect("https://example.com/moved.crl"))
+        .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+
+      const result = await fetchBinary("http://example.com/file.crl");
+
+      expect(result.ok).toBe(true);
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        "https://example.com/moved.crl",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    });
+
+    it("does not follow a redirect to a non-http scheme", async () => {
+      mockFetch.mockResolvedValueOnce(redirect("file:///etc/passwd"));
+
+      const result = await fetchBinary("http://example.com/file.crl");
+
+      expect(result.ok).toBe(false);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops after the maximum number of redirects", async () => {
+      mockFetch.mockImplementation(async () => redirect("http://example.com/again"));
+
+      const result = await fetchBinary("http://example.com/file.crl", { maxRedirects: 2 });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/Too many redirects/);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("switches a POST to GET on a 303 redirect", async () => {
+      mockFetch
+        .mockResolvedValueOnce(redirect("http://example.com/result", 303))
+        .mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
+
+      await fetchOCSP("http://ocsp.example.com", new ArrayBuffer(10));
+
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        "http://example.com/result",
+        expect.objectContaining({ method: "GET", body: undefined }),
+      );
+    });
+  });
 });
