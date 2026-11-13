@@ -43,7 +43,7 @@ export interface RevocationCheckOptions {
    * Example: "https://cors-proxy.example.com/?url="
    */
   proxyUrl?: string;
-  /** Maximum CRL download size in bytes (default: 10 MB) */
+  /** Maximum CRL download size in bytes (default: 50 MB) */
   crlMaxBytes?: number;
   /** Maximum OCSP response size in bytes (default: 1 MB) */
   ocspMaxBytes?: number;
@@ -59,7 +59,7 @@ export const DEFAULT_REVOCATION_OPTIONS: Required<
   crlEnabled: true,
   ocspTimeout: 5000,
   crlTimeout: 10000,
-  crlMaxBytes: 10 * 1024 * 1024,
+  crlMaxBytes: 50 * 1024 * 1024,
   ocspMaxBytes: 1024 * 1024,
 };
 

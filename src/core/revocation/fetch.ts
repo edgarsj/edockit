@@ -8,7 +8,8 @@
 /** Default response size cap for generic fetches (e.g. trusted lists) */
 export const DEFAULT_MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 /** Default response size cap for CRL downloads */
-export const DEFAULT_MAX_CRL_BYTES = 10 * 1024 * 1024;
+// National CRLs can be large (the Estonian ID card CRL is ~18 MB)
+export const DEFAULT_MAX_CRL_BYTES = 50 * 1024 * 1024;
 /** Default response size cap for OCSP responses and certificates */
 export const DEFAULT_MAX_OCSP_BYTES = 1024 * 1024;
 /** Default maximum number of HTTP redirects followed */
