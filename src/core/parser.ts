@@ -60,6 +60,48 @@ function resolveLimit(value: number | undefined, fallback: number, name: string)
 }
 
 /**
+ * Check that a ZIP entry name is a plain relative path inside the container.
+ *
+ * Both "/" and "\" are treated as separators for this check, so that names
+ * written with Windows-style separators are held to the same rules. Names are
+ * otherwise exposed unchanged.
+ */
+function validateEntryName(name: string): void {
+  if (name.length === 0) {
+    throw new Error("Container has an entry with an empty name");
+  }
+  if (name.includes("\0")) {
+    throw new Error(`Entry name contains a NUL character: "${name.replace(/\0/g, "\\0")}"`);
+  }
+  if (name.startsWith("/") || name.startsWith("\\")) {
+    throw new Error(`Entry name must be a relative path: "${name}"`);
+  }
+  if (/^[A-Za-z]:/.test(name)) {
+    throw new Error(`Entry name must not start with a drive letter: "${name}"`);
+  }
+  if (name.split(/[\\/]/).some((segment) => segment === "..")) {
+    throw new Error(`Entry name must not contain ".." segments: "${name}"`);
+  }
+  // fflate collects entries in a plain object, where this key would set the
+  // prototype instead of creating an entry, so the file would silently disappear
+  if (name === "__proto__") {
+    throw new Error(`Unsupported entry name: "${name}"`);
+  }
+}
+
+/**
+ * Metadata entries are the "mimetype" file and anything whose first path
+ * segment is exactly "META-INF".
+ */
+function isMetadataEntry(name: string): boolean {
+  if (name === "mimetype") {
+    return true;
+  }
+  const segments = name.split("/");
+  return segments.length > 1 && segments[0] === "META-INF";
+}
+
+/**
  * Parse an eDoc container from a buffer
  * @param edocBuffer The raw eDoc file content
  * @param options Optional limits for container size and entry count
@@ -85,6 +127,8 @@ export function parseEdoc(edocBuffer: Uint8Array, options: ParseEdocOptions = {}
 
     let entryCount = 0;
     let totalSize = 0;
+    const entryNames: string[] = [];
+    const seenNames = new Set<string>();
 
     // Unzip the eDoc container. The filter runs for each entry before its data is
     // allocated, so throwing here stops extraction before any oversized buffer exists.
@@ -96,6 +140,14 @@ export function parseEdoc(edocBuffer: Uint8Array, options: ParseEdocOptions = {}
         }
 
         const { name, size, originalSize, compression } = entry;
+
+        validateEntryName(name);
+        if (seenNames.has(name)) {
+          throw new Error(`Container has more than one entry named "${name}"`);
+        }
+        seenNames.add(name);
+        entryNames.push(name);
+
         if (
           !Number.isFinite(size) ||
           !Number.isFinite(originalSize) ||
@@ -136,21 +188,24 @@ export function parseEdoc(edocBuffer: Uint8Array, options: ParseEdocOptions = {}
       },
     });
 
-    // Convert to Maps for easier access
+    // Convert to Maps for easier access, keeping the container's entry order
     const files = new Map<string, Uint8Array>();
     const documentFileList: string[] = [];
     const metadataFileList: string[] = [];
 
-    Object.entries(unzipped).forEach(([filename, content]) => {
-      files.set(filename, content);
+    for (const filename of entryNames) {
+      if (!Object.prototype.hasOwnProperty.call(unzipped, filename)) {
+        throw new Error(`Entry "${filename}" could not be read`);
+      }
+      files.set(filename, unzipped[filename]);
 
       // Separate files into document and metadata categories
-      if (filename.startsWith("META-INF/") || filename === "mimetype") {
+      if (isMetadataEntry(filename)) {
         metadataFileList.push(filename);
       } else {
         documentFileList.push(filename);
       }
-    });
+    }
 
     // Find and parse signatures
     const signatures: SignatureInfo[] = [];
