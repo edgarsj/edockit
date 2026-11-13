@@ -1,6 +1,7 @@
 import { X509CertificateGenerator } from "@peculiar/x509";
 import {
   fetchTrustedListBundleWithDiagnostics,
+  resolveTrustedListFetchUrl,
   type TrustedListSource,
 } from "../../../../src/core/trustedlist";
 
@@ -135,5 +136,25 @@ describe("trusted-list fetch diagnostics", () => {
 
     expect(result.bundle.services.some((service) => service[3] === "LV")).toBe(true);
     expect(result.diagnostics.unreachableTerritories).toEqual(["EE", "FI", "PL"]);
+  });
+});
+
+describe("resolveTrustedListFetchUrl", () => {
+  it("upgrades plain-HTTP trusted-list locations to HTTPS by default", () => {
+    expect(resolveTrustedListFetchUrl("http://tl.nbu.gov.sk/kca/tsl/tsl.xml")).toBe(
+      "https://tl.nbu.gov.sk/kca/tsl/tsl.xml",
+    );
+    expect(resolveTrustedListFetchUrl("HTTP://example.test/tl.xml")).toBe(
+      "https://example.test/tl.xml",
+    );
+  });
+
+  it("leaves HTTPS untouched and honours allowInsecureHttp", () => {
+    expect(resolveTrustedListFetchUrl("https://example.test/tl.xml")).toBe(
+      "https://example.test/tl.xml",
+    );
+    expect(
+      resolveTrustedListFetchUrl("http://example.test/tl.xml", { allowInsecureHttp: true }),
+    ).toBe("http://example.test/tl.xml");
   });
 });

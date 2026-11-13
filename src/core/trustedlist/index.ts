@@ -65,21 +65,45 @@ async function fetchXml(url: string, options: TrustedListFetchOptions = {}): Pro
   return new TextDecoder().decode(result.data);
 }
 
+/**
+ * Upgrade `http://` trusted-list locations to `https://` unless the caller
+ * explicitly allows plain HTTP. Trusted lists are not signature-verified here,
+ * so a plain-HTTP fetch would let a network attacker inject trust anchors.
+ */
+export function resolveTrustedListFetchUrl(
+  url: string,
+  options: Pick<TrustedListFetchOptions, "allowInsecureHttp"> = {},
+): string {
+  if (options.allowInsecureHttp || !/^http:\/\//i.test(url)) {
+    return url;
+  }
+  return `https://${url.slice("http://".length)}`;
+}
+
 async function fetchXmlWithWarnings(
   url: string,
   options: TrustedListFetchOptions = {},
 ): Promise<string | null> {
-  try {
-    return await fetchXml(url, options);
-  } catch (error) {
-    // The Node-only builder intentionally skips broken endpoints, including
-    // TLS-chain failures such as UNABLE_TO_VERIFY_LEAF_SIGNATURE, rather than
-    // attempting local intermediate repair in the generic fetch path.
-    console.warn(
-      `Trusted-list fetch warning for "${url}": ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return null;
+  const fetchUrl = resolveTrustedListFetchUrl(url, options);
+  const attempts = 1 + Math.max(0, Math.floor(options.retries ?? 1));
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchXml(fetchUrl, options);
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  // The Node-only builder intentionally skips broken endpoints, including
+  // TLS-chain failures such as UNABLE_TO_VERIFY_LEAF_SIGNATURE, rather than
+  // attempting local intermediate repair in the generic fetch path.
+  const upgradeNote = fetchUrl !== url ? ` (upgraded from "${url}")` : "";
+  console.warn(
+    `Trusted-list fetch warning for "${fetchUrl}"${upgradeNote}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+  return null;
 }
 
 function isProbablyXmlDocument(xml: string): boolean {
