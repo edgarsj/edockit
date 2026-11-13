@@ -353,7 +353,7 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
     // Find DigestValue
     const digestValueEl = getSingleDsigChild(reference, "DigestValue");
     if (digestValueEl && digestValueEl.textContent) {
-      if (cleanUri in signedChecksums) {
+      if (Object.prototype.hasOwnProperty.call(signedChecksums, cleanUri)) {
         throw new Error(`Duplicate reference to "${cleanUri}" in SignedInfo`);
       }
       signedChecksums[cleanUri] = getCompactText(digestValueEl);

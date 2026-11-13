@@ -785,8 +785,13 @@ export async function verifyChecksums(
   const checksumPromises = Object.entries(signature.signedChecksums).map(
     async ([filename, expectedChecksum]) => {
       // Get the per-file digest algorithm, or fall back to default
-      const digestAlgorithm = signature.digestAlgorithms?.[filename]
-        ? parseDigestAlgorithmUri(signature.digestAlgorithms[filename])
+      const ownDigestAlgorithm =
+        signature.digestAlgorithms &&
+        Object.prototype.hasOwnProperty.call(signature.digestAlgorithms, filename)
+          ? signature.digestAlgorithms[filename]
+          : undefined;
+      const digestAlgorithm = ownDigestAlgorithm
+        ? parseDigestAlgorithmUri(ownDigestAlgorithm)
         : defaultDigestAlgorithm;
 
       // Check if file exists in the container

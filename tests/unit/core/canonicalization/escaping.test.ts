@@ -27,4 +27,20 @@ describe("Canonical XML escaping", () => {
       XMLCanonicalizer.canonicalize(asElement.documentElement, method),
     );
   });
+
+  it.each(METHODS)("renders CDATA sections as escaped character data (%s)", (method) => {
+    const parser = createXMLParser();
+    const withCdata = parser.parseFromString(
+      `<r><n><![CDATA[CN=CA & Co <x>]]></n></r>`,
+      "application/xml",
+    );
+    const asText = parser.parseFromString(
+      `<r><n>CN=CA &amp; Co &lt;x&gt;</n></r>`,
+      "application/xml",
+    );
+
+    const canonical = XMLCanonicalizer.canonicalize(withCdata.documentElement, method);
+    expect(canonical).toBe(XMLCanonicalizer.canonicalize(asText.documentElement, method));
+    expect(canonical).toContain("CN=CA &amp; Co &lt;x&gt;");
+  });
 });

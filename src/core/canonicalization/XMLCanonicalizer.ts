@@ -1,4 +1,15 @@
 // Define types for canonicalization methods
+/**
+ * Text and CDATA sections are both character data: Canonical XML replaces
+ * CDATA sections with their (escaped) character content.
+ */
+function isCharacterData(node: Node | null | undefined): boolean {
+  return (
+    !!node &&
+    (node.nodeType === NODE_TYPES.TEXT_NODE || node.nodeType === NODE_TYPES.CDATA_SECTION_NODE)
+  );
+}
+
 interface CanonMethod {
   beforeChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
   afterChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
@@ -53,6 +64,7 @@ const methods: Record<string, CanonMethod> = {
 const NODE_TYPES = {
   ELEMENT_NODE: 1,
   TEXT_NODE: 3,
+  CDATA_SECTION_NODE: 4,
 };
 
 // Options for exclusive canonicalization
@@ -282,7 +294,7 @@ class XMLCanonicalizer {
 
         // First, check if there's any non-whitespace text content
         for (const child of children) {
-          if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+          if (isCharacterData(child)) {
             const text = child.nodeValue || "";
             if (text.trim().length > 0) {
               hasTextContent = true;
@@ -303,7 +315,7 @@ class XMLCanonicalizer {
         for (let i = 0; i < children.length; i++) {
           const child = children[i] as NodeWithWhitespace;
 
-          if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+          if (isCharacterData(child)) {
             const text = child.nodeValue || "";
 
             // Store original text
@@ -481,7 +493,7 @@ class XMLCanonicalizer {
         const nextIsElement = nextChild && nextChild.nodeType === NODE_TYPES.ELEMENT_NODE;
 
         // Handle text node
-        if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+        if (isCharacterData(child)) {
           const text = child.nodeValue || "";
 
           if (XMLCanonicalizer.isBase64Element(node)) {
@@ -525,7 +537,7 @@ class XMLCanonicalizer {
       }
 
       result += "</" + qName + ">";
-    } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
+    } else if (isCharacterData(node)) {
       // For standalone text nodes
       const text = node._originalText || node.nodeValue || "";
       result += XMLCanonicalizer.escapeText(text);
@@ -639,7 +651,7 @@ class XMLCanonicalizer {
       for (let i = 0; i < children.length; i++) {
         const child = children[i] as NodeWithWhitespace;
 
-        if (child.nodeType === NODE_TYPES.TEXT_NODE) {
+        if (isCharacterData(child)) {
           const text = child.nodeValue || "";
 
           if (XMLCanonicalizer.isBase64Element(node)) {
@@ -665,7 +677,7 @@ class XMLCanonicalizer {
 
       // Close the element
       result += "</" + qName + ">";
-    } else if (node.nodeType === NODE_TYPES.TEXT_NODE) {
+    } else if (isCharacterData(node)) {
       // Handle standalone text node
       const text = node.nodeValue || "";
       result += XMLCanonicalizer.escapeText(text);

@@ -106,6 +106,15 @@ describe("Signature Parser", () => {
     expect(() => parseTopLevel(xml)).toThrow(/SignedInfo element not found/);
   });
 
+  it("accepts file names that match Object.prototype properties", () => {
+    const xml = minimalSignature(
+      `${reference("constructor", "YQ==")}${reference("toString", "Yg==")}`,
+    );
+    const result = parseTopLevel(xml);
+    expect(Object.keys(result.signedChecksums).sort()).toEqual(["constructor", "toString"]);
+    expect(result.signedChecksums.constructor).toBe("YQ==");
+  });
+
   it("rejects duplicate references to the same file", () => {
     const xml = minimalSignature(`${reference("doc.txt", "YQ==")}${reference("doc.txt", "Yg==")}`);
     expect(() => parseTopLevel(xml)).toThrow(/Duplicate reference/);
