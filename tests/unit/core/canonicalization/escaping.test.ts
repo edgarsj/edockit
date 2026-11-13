@@ -93,10 +93,25 @@ describe("Canonical XML escaping", () => {
       XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"),
     ).toBe(`<sp Id="a" xml:base="http://x/" xml:lang="lv" xml:space="preserve"><c>t</c></sp>`);
     expect(XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/2006/12/xml-c14n11")).toBe(
-      `<sp Id="a" xml:lang="lv" xml:space="preserve"><c>t</c></sp>`,
+      `<sp Id="a" xml:base="http://x/" xml:lang="lv" xml:space="preserve"><c>t</c></sp>`,
     );
     expect(XMLCanonicalizer.canonicalize(sp, "http://www.w3.org/2001/10/xml-exc-c14n#")).toBe(
       `<sp Id="a"><c>t</c></sp>`,
+    );
+  });
+
+  it("applies the C14N 1.1 xml:base fixup to a canonicalized subtree", () => {
+    const doc = createXMLParser().parseFromString(
+      `<root xml:base="https://example.com/a/"><mid xml:base="b/"><sp Id="a"/><own xml:base="c.xml"/></mid></root>`,
+      "application/xml",
+    );
+    const c14n11 = "http://www.w3.org/2006/12/xml-c14n11";
+
+    expect(XMLCanonicalizer.canonicalize(doc.getElementsByTagName("sp")[0], c14n11)).toBe(
+      `<sp Id="a" xml:base="https://example.com/a/b/"></sp>`,
+    );
+    expect(XMLCanonicalizer.canonicalize(doc.getElementsByTagName("own")[0], c14n11)).toBe(
+      `<own xml:base="https://example.com/a/b/c.xml"></own>`,
     );
   });
 });

@@ -90,7 +90,9 @@ function canonicalizeReferenceTarget(reference: Element, target: Element): strin
     throw new Error(`Unsupported transform on same-document reference: ${algorithm}`);
   }
 
-  return XMLCanonicalizer.canonicalize(target, algorithm, {
+  // A bare-name reference (#id) dereferences to a node-set without comments,
+  // so comments are omitted even for the #WithComments variants
+  return XMLCanonicalizer.canonicalize(target, algorithm.replace(/#WithComments$/, ""), {
     inclusiveNamespacePrefixList: getInclusiveNamespacePrefixes(transforms[0]),
   });
 }

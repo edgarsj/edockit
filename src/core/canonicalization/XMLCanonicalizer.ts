@@ -10,6 +10,26 @@ function isCharacterData(node: Node | null | undefined): boolean {
   );
 }
 
+/**
+ * Join an xml:base value onto a base URI (RFC 3986 reference resolution, with a
+ * path-merge fallback for relative bases).
+ */
+function joinXmlBase(base: string, reference: string): string {
+  if (reference === "") {
+    return base;
+  }
+  try {
+    return new URL(reference, base).href;
+  } catch {
+    // base is not an absolute URI
+  }
+  if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("/")) {
+    return reference;
+  }
+  const directory = base.includes("/") ? base.slice(0, base.lastIndexOf("/") + 1) : "";
+  return directory + reference;
+}
+
 /** Canonical form of a processing instruction inside the document element. */
 function renderProcessingInstruction(node: Node): string {
   const pi = node as ProcessingInstruction;
@@ -135,6 +155,7 @@ class XMLCanonicalizer {
         if (!attr.name.startsWith("xml:") || own.has(attr.name) || inherited.has(attr.name)) {
           continue;
         }
+        // C14N 1.1 inherits xml:lang and xml:space; xml:base is fixed up below
         if (isC14n11 && attr.name !== "xml:lang" && attr.name !== "xml:space") {
           continue;
         }
@@ -143,15 +164,39 @@ class XMLCanonicalizer {
       current = current.parentNode;
     }
 
-    return Array.from(inherited.values()).map(
-      (attr) =>
-        ({
-          name: attr.name,
-          value: attr.value,
-          localName: attr.name.substring(4),
-          namespaceURI: XML_NAMESPACE,
-        }) as unknown as Attr,
+    const result = Array.from(inherited.values()).map((attr) =>
+      XMLCanonicalizer.xmlAttribute(attr.name, attr.value),
     );
+
+    // C14N 1.1 xml:base fixup: the starting element gets the base URI formed
+    // by joining the xml:base values of its ancestors (and its own, if any)
+    if (isC14n11) {
+      const bases: string[] = [];
+      let ancestor = element.parentNode;
+      while (ancestor && ancestor.nodeType === NODE_TYPES.ELEMENT_NODE) {
+        const value = (ancestor as Element).getAttribute("xml:base");
+        if (value !== null) {
+          bases.unshift(value);
+        }
+        ancestor = ancestor.parentNode;
+      }
+      if (bases.length > 0) {
+        const ownBase = element.getAttribute("xml:base");
+        const joined = [...bases, ...(ownBase !== null ? [ownBase] : [])].reduce(joinXmlBase);
+        result.push(XMLCanonicalizer.xmlAttribute("xml:base", joined));
+      }
+    }
+
+    return result;
+  }
+
+  private static xmlAttribute(name: string, value: string): Attr {
+    return {
+      name,
+      value,
+      localName: name.substring(4),
+      namespaceURI: XML_NAMESPACE,
+    } as unknown as Attr;
   }
 
   /** Canonical form of a comment node, or "" when comments are omitted. */
@@ -494,7 +539,14 @@ class XMLCanonicalizer {
       // Inclusive canonicalization of a subtree carries over xml:* attributes
       // in scope from ancestors (C14N 1.1: only xml:lang and xml:space)
       if (options.isStartingNode) {
-        attrArray.push(...this.collectInheritedXmlAttributes(element));
+        const inheritedXml = this.collectInheritedXmlAttributes(element);
+        const replaced = new Set(inheritedXml.map((attr) => attr.name));
+        for (let i = attrArray.length - 1; i >= 0; i--) {
+          if (replaced.has(attrArray[i].name)) {
+            attrArray.splice(i, 1);
+          }
+        }
+        attrArray.push(...inheritedXml);
       }
 
       attrArray.sort(XMLCanonicalizer.compareAttributes);
