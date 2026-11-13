@@ -91,6 +91,11 @@ export interface TrustedListData {
 export interface IssuerIdentity {
   issuerSubjectDn: string;
   authorityKeyIdentifierHex?: string | null;
+  /**
+   * True when a certificate carrying the issuer's name was available but its
+   * key did not verify the certificate's signature.
+   */
+  issuerSignatureMismatch?: boolean;
   issuerCertificate?: {
     subjectDn: string;
     spkiSha256Hex: string;

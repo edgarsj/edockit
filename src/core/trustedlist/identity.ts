@@ -3,7 +3,7 @@ import {
   SubjectKeyIdentifierExtension,
   X509Certificate,
 } from "@peculiar/x509";
-import { findIssuerInChain, fetchIssuerFromAIA } from "../revocation/ocsp";
+import { fetchIssuerFromAIA, resolveIssuerFromChain } from "../revocation/ocsp";
 import { arrayBufferToHex } from "../../utils/encoding";
 import { normalizeDistinguishedName, normalizeKeyIdentifier } from "./normalize";
 import type { CertificateIdentity, IssuerIdentity, TrustedListFetchOptions } from "./types";
@@ -37,6 +37,24 @@ function getSubjectKeyIdentifierHex(certificate: X509Certificate): string | null
   return normalizeKeyIdentifier(subjectKeyIdentifier?.keyId);
 }
 
+async function isIssuedBy(certificate: X509Certificate, issuer: X509Certificate): Promise<boolean> {
+  try {
+    return (
+      certificate.issuer === issuer.subject &&
+      (await certificate.verify({ publicKey: issuer, signatureOnly: true }))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Derive the issuer identity of a certificate for trusted-list matching.
+ *
+ * `issuerCertificate` is only populated with a certificate whose key verifies
+ * the signature on `certificatePem`; candidates from the chain or from AIA
+ * that merely carry the issuer's name are ignored.
+ */
 export async function extractIssuerIdentityFromCertificate(
   certificatePem: string,
   options: ExtractIssuerIdentityOptions = {},
@@ -44,20 +62,37 @@ export async function extractIssuerIdentityFromCertificate(
   const signerCertificate = new X509Certificate(certificatePem);
   let issuerCertificate =
     options.certificateChain && options.certificateChain.length > 0
-      ? findIssuerInChain(signerCertificate, options.certificateChain)
+      ? await resolveIssuerFromChain(signerCertificate, options.certificateChain)
       : null;
+  let rejectedIssuerCandidate = false;
+
+  if (!issuerCertificate) {
+    rejectedIssuerCandidate = (options.certificateChain ?? []).some((pem) => {
+      try {
+        return new X509Certificate(pem).subject === signerCertificate.issuer;
+      } catch {
+        return false;
+      }
+    });
+  }
 
   if (!issuerCertificate && options.fetchOptions) {
-    issuerCertificate = await fetchIssuerFromAIA(
+    const fetched = await fetchIssuerFromAIA(
       signerCertificate,
       options.fetchOptions.timeout,
       options.fetchOptions.proxyUrl,
     );
+    if (fetched && (await isIssuedBy(signerCertificate, fetched))) {
+      issuerCertificate = fetched;
+    } else if (fetched && fetched.subject === signerCertificate.issuer) {
+      rejectedIssuerCandidate = true;
+    }
   }
 
   return {
     issuerSubjectDn: normalizeDistinguishedName(signerCertificate.issuer),
     authorityKeyIdentifierHex: getAuthorityKeyIdentifierHex(signerCertificate),
+    ...(issuerCertificate ? {} : { issuerSignatureMismatch: rejectedIssuerCandidate }),
     issuerCertificate: issuerCertificate
       ? {
           subjectDn: normalizeDistinguishedName(issuerCertificate.subject),
