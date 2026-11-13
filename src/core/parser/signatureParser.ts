@@ -107,15 +107,6 @@ export function parseSignatureFile(xmlContent: Uint8Array, filename: string): Si
           return signatureInfo;
         }
       }
-
-      // Fallback: parse as text
-      const mockSignature = parseBasicSignatureFromText(text);
-      if (mockSignature) {
-        return {
-          ...mockSignature,
-          rawXml: text,
-        };
-      }
     }
 
     return null;
@@ -423,76 +414,8 @@ export function parseSignatureElement(signatureElement: Element, xmlDoc: Documen
   };
 }
 
-/**
- * Fallback for creating a basic signature from text when DOM parsing fails
- * @param xmlText The full XML text
- * @returns A basic signature or null if parsing fails
- */
-export function parseBasicSignatureFromText(xmlText: string): SignatureInfo | null {
-  try {
-    // Extract signature ID
-    const idMatch = xmlText.match(/<ds:Signature[^>]*Id=["']([^"']*)["']/);
-    const id = idMatch && idMatch[1] ? idMatch[1] : "unknown";
-
-    // Extract signature value
-    const sigValueMatch = xmlText.match(/<ds:SignatureValue[^>]*>([\s\S]*?)<\/ds:SignatureValue>/);
-    const signatureValue =
-      sigValueMatch && sigValueMatch[1] ? sigValueMatch[1].replace(/\s+/g, "") : "";
-
-    // Extract certificate
-    const certMatch = xmlText.match(/<ds:X509Certificate>([\s\S]*?)<\/ds:X509Certificate>/);
-    const certificate = certMatch && certMatch[1] ? certMatch[1].replace(/\s+/g, "") : "";
-
-    // Extract algorithm
-    const algoMatch = xmlText.match(/<ds:SignatureMethod[^>]*Algorithm=["']([^"']*)["']/);
-    const algorithm = algoMatch && algoMatch[1] ? algoMatch[1] : "";
-
-    // Extract signing time
-    const timeMatch = xmlText.match(/<xades:SigningTime>([\s\S]*?)<\/xades:SigningTime>/);
-    const signingTime = timeMatch && timeMatch[1] ? new Date(timeMatch[1].trim()) : new Date();
-
-    // Extract references
-    const references: string[] = [];
-    const signedChecksums: Record<string, string> = {};
-
-    // Use regex to find all references
-    const refRegex =
-      /<ds:Reference[^>]*URI=["']([^#][^"']*)["'][^>]*>[\s\S]*?<ds:DigestValue>([\s\S]*?)<\/ds:DigestValue>/g;
-    let refMatch;
-
-    while ((refMatch = refRegex.exec(xmlText)) !== null) {
-      if (refMatch[1] && !refMatch[1].startsWith("#")) {
-        const uri = decodeURIComponent(refMatch[1]);
-        references.push(uri);
-
-        if (refMatch[2]) {
-          signedChecksums[uri] = refMatch[2].replace(/\s+/g, "");
-        }
-      }
-    }
-
-    // Format the PEM certificate
-    const certificatePEM = formatPEM(certificate);
-
-    return {
-      id,
-      signingTime,
-      certificate,
-      certificatePEM,
-      signedChecksums,
-      references,
-      algorithm,
-      signatureValue,
-    };
-  } catch (error) {
-    console.error("Error in fallback text parsing:", error);
-    return null;
-  }
-}
-
 // This exports a testing module that won't be re-exported from the main parser
 export const __test__ = {
   parseSignatureElement,
-  parseBasicSignatureFromText,
   formatPEM,
 };
