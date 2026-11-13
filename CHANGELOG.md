@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
 ### Added
 
 - **Trusted-list match source** - `TrustListMatch` now carries `source` / `sourceLabel` identifying the LOTL a matched service was published through (`"eu"` or `"ades"` with the default sources), so applications can distinguish third-country trusted lists (AdES LOTL) from EU/EEA ones. Compact bundles store this as an optional seventh element (source index) per service; older bundles remain readable
@@ -162,7 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File checksum verification (SHA-256/384/512)
 - Browser and Node.js support
 
-[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/edgarsj/edockit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/edgarsj/edockit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/edgarsj/edockit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/edgarsj/edockit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/edgarsj/edockit/compare/v0.2.4...v0.3.0
