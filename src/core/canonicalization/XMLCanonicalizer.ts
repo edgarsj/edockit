@@ -10,6 +10,13 @@ function isCharacterData(node: Node | null | undefined): boolean {
   );
 }
 
+/** Canonical form of a processing instruction inside the document element. */
+function renderProcessingInstruction(node: Node): string {
+  const pi = node as ProcessingInstruction;
+  const data = pi.data || pi.nodeValue || "";
+  return `<?${pi.target || pi.nodeName}${data ? ` ${data}` : ""}?>`;
+}
+
 interface CanonMethod {
   beforeChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
   afterChildren: (hasElementChildren?: boolean, hasMixedContent?: boolean) => string;
@@ -65,6 +72,7 @@ const NODE_TYPES = {
   ELEMENT_NODE: 1,
   TEXT_NODE: 3,
   CDATA_SECTION_NODE: 4,
+  PROCESSING_INSTRUCTION_NODE: 7,
 };
 
 // Options for exclusive canonicalization
@@ -496,14 +504,16 @@ class XMLCanonicalizer {
         if (isCharacterData(child)) {
           const text = child.nodeValue || "";
 
-          if (XMLCanonicalizer.isBase64Element(node)) {
-            // Special handling for base64 content
-            result += text.replace(/\r/g, "&#xD;");
-          } else {
-            // Character data is escaped per Canonical XML (&, <, >, CR)
-            result += XMLCanonicalizer.escapeText(child._originalText || text);
-          }
+          // Character data is escaped per Canonical XML (&, <, >, CR)
+          result += XMLCanonicalizer.escapeText(child._originalText || text);
 
+          lastWasElement = false;
+          continue;
+        }
+
+        // Processing instructions are retained (comments are omitted)
+        if (child.nodeType === NODE_TYPES.PROCESSING_INSTRUCTION_NODE) {
+          result += renderProcessingInstruction(child);
           lastWasElement = false;
           continue;
         }
@@ -654,13 +664,11 @@ class XMLCanonicalizer {
         if (isCharacterData(child)) {
           const text = child.nodeValue || "";
 
-          if (XMLCanonicalizer.isBase64Element(node)) {
-            // Special handling for base64 content
-            result += text.replace(/\r/g, "&#xD;");
-          } else {
-            // Regular text handling
-            result += XMLCanonicalizer.escapeText(text);
-          }
+          // Character data is escaped per Canonical XML (&, <, >, CR)
+          result += XMLCanonicalizer.escapeText(text);
+        } else if (child.nodeType === NODE_TYPES.PROCESSING_INSTRUCTION_NODE) {
+          // Processing instructions are retained (comments are omitted)
+          result += renderProcessingInstruction(child);
         } else if (child.nodeType === NODE_TYPES.ELEMENT_NODE) {
           // Recursively process child elements
           // For child elements, we pass the namespaces from the parent but mark as non-root

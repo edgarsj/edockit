@@ -43,4 +43,15 @@ describe("Canonical XML escaping", () => {
     expect(canonical).toBe(XMLCanonicalizer.canonicalize(asText.documentElement, method));
     expect(canonical).toContain("CN=CA &amp; Co &lt;x&gt;");
   });
+
+  it.each(METHODS)("retains processing instructions and omits comments (%s)", (method) => {
+    const doc = createXMLParser().parseFromString(
+      `<r><a/><?app some data?><!-- note --><?bare?></r>`,
+      "application/xml",
+    );
+    const canonical = XMLCanonicalizer.canonicalize(doc.documentElement, method);
+    expect(canonical).toContain("<?app some data?>");
+    expect(canonical).toContain("<?bare?>");
+    expect(canonical).not.toContain("note");
+  });
 });

@@ -64,12 +64,21 @@ export async function extractIssuerIdentityFromCertificate(
     options.certificateChain && options.certificateChain.length > 0
       ? await resolveIssuerFromChain(signerCertificate, options.certificateChain)
       : null;
+  const signerAuthorityKeyId = getAuthorityKeyIdentifierHex(signerCertificate);
   let rejectedIssuerCandidate = false;
 
-  if (!issuerCertificate) {
+  if (!issuerCertificate && signerAuthorityKeyId) {
+    // A candidate is only treated as the claimed issuer when both its name and
+    // its key identifier match what the signer certificate names (subject DN
+    // and authority key identifier). A same-name CA certificate with another
+    // key (e.g. a renewed CA) proves nothing about the signer certificate.
     rejectedIssuerCandidate = (options.certificateChain ?? []).some((pem) => {
       try {
-        return new X509Certificate(pem).subject === signerCertificate.issuer;
+        const candidate = new X509Certificate(pem);
+        return (
+          candidate.subject === signerCertificate.issuer &&
+          getSubjectKeyIdentifierHex(candidate) === signerAuthorityKeyId
+        );
       } catch {
         return false;
       }
@@ -84,14 +93,13 @@ export async function extractIssuerIdentityFromCertificate(
     );
     if (fetched && (await isIssuedBy(signerCertificate, fetched))) {
       issuerCertificate = fetched;
-    } else if (fetched && fetched.subject === signerCertificate.issuer) {
-      rejectedIssuerCandidate = true;
+      rejectedIssuerCandidate = false;
     }
   }
 
   return {
     issuerSubjectDn: normalizeDistinguishedName(signerCertificate.issuer),
-    authorityKeyIdentifierHex: getAuthorityKeyIdentifierHex(signerCertificate),
+    authorityKeyIdentifierHex: signerAuthorityKeyId,
     ...(issuerCertificate ? {} : { issuerSignatureMismatch: rejectedIssuerCandidate }),
     issuerCertificate: issuerCertificate
       ? {

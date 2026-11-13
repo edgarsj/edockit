@@ -92,8 +92,9 @@ export interface IssuerIdentity {
   issuerSubjectDn: string;
   authorityKeyIdentifierHex?: string | null;
   /**
-   * True when a certificate carrying the issuer's name was available but its
-   * key did not verify the certificate's signature.
+   * True when the issuer certificate named by the certificate (matching subject
+   * DN and authority key identifier) was available, but its key did not verify
+   * the certificate's signature.
    */
   issuerSignatureMismatch?: boolean;
   issuerCertificate?: {
