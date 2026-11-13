@@ -1,5 +1,6 @@
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { X509Certificate } from "@peculiar/x509";
 import { parseEdoc } from "../../src/core/parser";
 import { verifySignature } from "../../src/core/verification";
 import {
@@ -131,6 +132,71 @@ describe("RFC 3161 Timestamp Verification", () => {
       expect(result.isValid).toBe(true);
       expect(result.coversSignature).toBe(true);
       expect(result).toHaveProperty("info");
+    });
+  });
+
+  describe("Timestamp token signature on sample files", () => {
+    const samplesDir = join(__dirname, "../fixtures/valid_samples");
+    const sampleSignatures = readdirSync(samplesDir)
+      .filter((name) => /\.(edoc|asice)$/i.test(name))
+      .flatMap((name) =>
+        parseEdoc(readFileSync(join(samplesDir, name))).signatures.map((sig) => ({ name, sig })),
+      )
+      .filter(({ sig }) => sig.signatureTimestamp && sig.canonicalSignatureValue);
+
+    it("has sample signatures with timestamps", () => {
+      expect(sampleSignatures.length).toBeGreaterThan(1);
+    });
+
+    it.each(sampleSignatures.map(({ name, sig }) => [name, sig] as const))(
+      "verifies the timestamp token in %s",
+      async (_name, sig) => {
+        const result = await verifyTimestamp(sig.signatureTimestamp!, {
+          canonicalSignatureValue: sig.canonicalSignatureValue,
+        });
+
+        expect(result.reason).toBeUndefined();
+        expect(result.isValid).toBe(true);
+        expect(result.signatureValid).toBe(true);
+        expect(result.coversSignature).toBe(true);
+
+        // The identified certificate must be the TSA certificate referenced by the token
+        const tsaCert = new X509Certificate(result.info!.tsaCertificate!);
+        expect(tsaCert.subject).toMatch(/TSA|TIMESTAMPING/i);
+      },
+    );
+
+    it("rejects a sample timestamp token used for another signature", async () => {
+      const [first, second] = sampleSignatures;
+      const result = await verifyTimestamp(first.sig.signatureTimestamp!, {
+        canonicalSignatureValue: second.sig.canonicalSignatureValue,
+      });
+
+      expect(result.signatureValid).toBe(true);
+      expect(result.coversSignature).toBe(false);
+      expect(result.isValid).toBe(false);
+    });
+
+    it("rejects a sample timestamp token with a modified genTime", async () => {
+      const token = sampleSignatures[0].sig.signatureTimestamp!;
+      const original = parseTimestamp(token)!;
+      const bytes = Buffer.from(token, "base64");
+
+      // GeneralizedTime starts with YYYYMMDDHHMM; change the last minute digit
+      const prefix = original.genTime.toISOString().replace(/[-:T]/g, "").slice(0, 12);
+      const offset = bytes.indexOf(Buffer.from(prefix, "ascii"));
+      expect(offset).toBeGreaterThan(0);
+      const minuteDigit = offset + 11;
+      bytes[minuteDigit] = bytes[minuteDigit] === 0x30 ? 0x31 : 0x30;
+      const modified = bytes.toString("base64");
+
+      expect(parseTimestamp(modified)!.genTime.getTime()).not.toBe(original.genTime.getTime());
+
+      const result = await verifyTimestamp(modified, {
+        canonicalSignatureValue: sampleSignatures[0].sig.canonicalSignatureValue,
+      });
+      expect(result.isValid).toBe(false);
+      expect(result.signatureValid).toBe(false);
     });
   });
 
